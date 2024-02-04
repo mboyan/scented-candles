@@ -1,2 +1,2 @@
-# scientific-computing
-Scientific Computing: Restricted-choice course (2024), MSc Compuational Science (UvA/VU)
+# Scientific Computing
+This repository contains the code for the assignments of the course Scientific Computing at the University of Amsterdam (2024).
