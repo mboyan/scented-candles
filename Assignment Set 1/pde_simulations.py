@@ -70,6 +70,8 @@ def diffusion_step_GPU(system_old, system_new):
         system_new (GPU array) - the concentration values on the lattice after update
     """
     row, col = cuda.grid(2) # get the position (row and column) on the grid
+
+    
     
     return
 
