@@ -74,7 +74,7 @@ def diffusion_step_GPU(system_old, system_new):
     return
 
 
-def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, run_GPU=False):
+def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run_GPU=False):
     """
     Compute the evolution of a square lattice of concentration scalars
     based on the time-dependent diffusion equation
@@ -84,6 +84,7 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, run_GPU=False):
         D (float) - the diffusion constant; defaults to 1;
         dt (float) - timestep; defaults to 0.001;
         L (float) - the length of the lattice along one dimension; defaults to 1;
+        n_save_frames (int) - determines the number of frames to save during the simulation; detaults to 100;
         run_GPU (bool) - determines whether the simulation runs on GPU
     outputs:
         u_evolotion (numpy.ndarray) - the states of the lattice at all moments in time
@@ -98,11 +99,16 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, run_GPU=False):
     # Determine spatial increment
     dx = L / u_init.shape[0]
 
+    if D * dt / (dx ** 2) > 0.5:
+        print("Warning: inappropriate scaling of $\delta{x}$ and $\delta{t}$, may result in an unstable simulation.")
+
     # Determine number of frames
     n_frames = int(np.floor(t_max / dt))
 
     # Array for storing lattice states
-    u_evolution = np.empty((n_frames, N, N))
+    u_evolution = np.empty((n_save_frames, N, N))
+    save_interval = np.floor(n_frames / n_save_frames)
+    save_ct = 0
 
     # Initialise current state
     u_curr = np.array(u_init)
@@ -116,9 +122,6 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, run_GPU=False):
         
         # Pad with 1s at the top and 0s at the bottom
         u_curr_padded = np.pad(u_curr, ((1, 1), (0, 0)), mode='constant', constant_values=((0, 1), (None, None)))
-        print("Padded array:")
-        print(u_curr_padded)
-        print("=====")
         
         # Get shifted arrays
         u_curr_bottom = u_curr_padded[:-2]
@@ -128,17 +131,32 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, run_GPU=False):
 
         # Compute next state
         if run_GPU:
-            diffusion_step_GPU[invoke_smart_kernel(N)](d_u_next, d_u_curr)
+            if t % 2 == 0:
+                diffusion_step_GPU[invoke_smart_kernel(N)](d_u_curr, d_u_next)
 
+                # Save frame
+                if t % save_interval == 0:
+                    u_evolution[save_ct] = d_u_next.copy_to_host()
+                    save_ct += 1
+                
+            else:
+                diffusion_step_GPU[invoke_smart_kernel(N)](d_u_next, d_u_curr)
+
+                # Save frame
+                if t % save_interval == 0:
+                    u_evolution[save_ct] = d_u_curr.copy_to_host()
+                    save_ct += 1
+                
+            
         else:
             u_next = (D * dt / (dx ** 2)) * (u_curr_bottom + u_curr_top + u_curr_left + u_curr_right - 4 * u_curr) + u_curr
 
-        # Set current to previous and next to current
-        u_curr = np.array(u_next)
-        print("Resulting array:")
-        print(u_curr)
-        print("-----")
+            # Set current to previous and next to current
+            u_curr = np.array(u_next)
 
-        u_evolution[t] = np.array(u_curr)
+            # Save frame
+            if t % save_interval == 0:
+                u_evolution[save_ct] = np.array(u_curr)
+                save_ct += 1
     
     return u_evolution

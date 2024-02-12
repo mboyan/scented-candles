@@ -61,29 +61,33 @@ def plot_cylinder_topo(n_grid):
     """
     
     ax = plt.subplot(projection='3d')
-    ax.view_init(elev=45, azim=10)
+    ax.view_init(elev=60, azim=10)
 
     angles = np.linspace(0, 2*np.pi, n_grid)
     xs = np.cos(angles)
     ys = np.sin(angles)
-    zs = np.linspace(0, 1, n_grid)
+    zs = np.linspace(0, 3, n_grid)
 
     xs_grid, zs_grid = np.meshgrid(xs, zs)
     ys_grid, _ = np.meshgrid(ys, zs)
-    vals = np.zeros(zs_grid.shape)
+    vals = np.full(zs_grid.shape, np.nan)
+    # vals = np.zeros(zs_grid.shape)
+    vals[:1,:] = 0
     vals[-2:,:] = 1
 
     colors = plt.cm.viridis(vals)
 
-    ax.plot([1.01, 1.01], [0, 0], [0, 1], c='r', linewidth=5.0)
+    ax.plot([1.01, 1.01], [0, 0], [0, 3], c='r', linewidth=5.0)
     ax.plot_surface(xs_grid, ys_grid, zs_grid, cmap='viridis', facecolors=colors, alpha=0.5)
+    ax.set_aspect('equal', 'box')
 
     for i in range(vals.shape[0]-1):
         for j in range(vals.shape[1]-1):
             ax.text(0.5*(xs_grid[i,j] + xs_grid[i+1,j+1]),
                     0.5*(ys_grid[i,j] + ys_grid[i+1,j+1]),
                     0.5*(zs_grid[i,j] + zs_grid[i+1,j+1]),
-                    f'{i}, {j}', ha='center', va='center', color='r')
+                    f'{i}, {j}', ha='center', va='center', color='r', fontsize=8,
+                    bbox=dict(boxstyle="square,pad=0.3", fc="white", ec="k", lw=1, alpha=0.75))
 
     ax.set_axis_off()
     plt.show()
