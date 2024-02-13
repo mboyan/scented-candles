@@ -53,6 +53,53 @@ def animate_strings(frames, times, interval=10):
     return HTML(anim.to_html5_video())
 
 
+def animate_diffusion(frames, times, interval=10):
+    """
+    Creates a 2D animation of diffusion on a square lattice.
+    input:
+        frames (numpy.ndarray) - a 3D array containing the frames for the animation
+        times (numpy.ndarray) - an array with the corresponding timesteps
+    output:
+        an HTML animation
+    """
+
+    assert frames.ndim == 3, 'frames must be a 3D array'
+    assert frames.shape[1] == frames.shape[2], 'lattice must be square'
+    assert frames.shape[0] == times.shape[0], 'mismatch between number of frames and timesteps'
+
+    n_frames = times.shape[0]
+
+    fig, ax = plt.subplots()
+    plot = ax.imshow(frames[0], vmin=0.0, vmax=1.0, origin='lower')
+    time_txt = ax.text(0.05, 0.05, '', c='w', transform=ax.transAxes)
+
+    def init_anim():
+        """
+        Initialize animation
+        """
+        plot.set_array(frames[0])
+        time_txt.set_text('')
+        ax.set_xlabel('$x$')
+        ax.set_ylabel('$y$')
+        ax.set_title('Numerical solution of the diffusion equation')
+        return plot, time_txt
+    
+    def update(i):
+        """
+        Update animation
+        """
+        plot.set_array(frames[i])
+        time_txt.set_text(f'$t={times[i]:.3f}$')
+        return plot, time_txt
+    
+    anim = animation.FuncAnimation(fig, update, init_func=init_anim, frames=n_frames, interval=interval, blit=True)
+
+    plt.tight_layout()
+    plt.show()
+
+    return HTML(anim.to_html5_video())
+
+
 def plot_cylinder_topo(n_grid):
     """
     Illustrate a cylindrical grid topology in a 3D plot
