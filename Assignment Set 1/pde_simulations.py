@@ -113,7 +113,7 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run
     assert u_init.ndim == 2, 'input array must be 2-dimensional'
     assert u_init.shape[0] == u_init.shape[1], 'lattice must have equal size along each dimension'
 
-    # Determine number of lattice intervals
+    # Determine number of lattice rows/columns
     N = u_init.shape[0]
 
     # Determine spatial increment
@@ -136,19 +136,24 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run
 
     # Send to device
     if run_GPU:
-        d_u_curr = cuda.to_device(u_curr)
-        d_u_next = cuda.to_device(u_curr)
+        d_u_curr = cuda.to_device(u_curr[:, 1:-1])
+        d_u_next = cuda.to_device(u_curr[:, 1:-1])
 
     for t in range(n_frames):
         
         # Pad with 1s at the top and 0s at the bottom
-        u_curr_padded = np.pad(u_curr, ((1, 1), (0, 0)), mode='constant', constant_values=((0, 1), (None, None)))
+        # u_curr_padded = np.pad(u_curr, ((1, 1), (0, 0)), mode='constant', constant_values=((0, 1), (None, None)))
         
         # Get shifted arrays
-        u_curr_bottom = u_curr_padded[:-2]
-        u_curr_top = u_curr_padded[2:]
-        u_curr_left = np.roll(u_curr, -1, axis=1)
-        u_curr_right = np.roll(u_curr, 1, axis=1)
+        # u_curr_bottom = u_curr_padded[:-2]
+        # u_curr_top = u_curr_padded[2:]
+        # u_curr_left = np.roll(u_curr, -1, axis=1)
+        # u_curr_right = np.roll(u_curr, 1, axis=1)
+        u_curr_center = u_curr[1:-1,:]
+        u_curr_bottom = u_curr[:-2,:]
+        u_curr_top = u_curr[2:,:]
+        u_curr_left = np.roll(u_curr, -1, axis=1)[1:-1,:]
+        u_curr_right = np.roll(u_curr, 1, axis=1)[1:-1,:]
 
         # Compute next state
         if run_GPU:
@@ -172,10 +177,10 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run
                 
             
         else:
-            u_next = (D * dt / (dx ** 2)) * (u_curr_bottom + u_curr_top + u_curr_left + u_curr_right - 4 * u_curr) + u_curr
-
-            # Set current to previous and next to current
-            u_curr = np.array(u_next)
+            u_next = (D * dt / (dx ** 2)) * (u_curr_bottom + u_curr_top + u_curr_left + u_curr_right - 4 * u_curr_center) + u_curr_center
+            
+            # Update current array (apart from top and bottom row)
+            u_curr[1:-1, :] = np.array(u_next)
 
             # Save frame
             if t % save_interval == 0:
