@@ -58,13 +58,14 @@ def invoke_smart_kernel(size, threads_per_block=(16,16)):
     """
     Invokes kernel size parameters (number of blocks and number of threads per block)
     """
-    blocks_per_grid = tuple([(size + tpb - 1) // tpb for tpb in threads_per_block])
+    # blocks_per_grid = tuple([(size + tpb - 1) // tpb for tpb in threads_per_block])
+    blocks_per_grid = tuple([(s + tpb - 1) // tpb for s, tpb in zip(size, threads_per_block)])
 
     return blocks_per_grid, threads_per_block
 
 
 @cuda.jit()
-def diffusion_step_GPU(system_old, system_new, D, dt, dx):
+def diffusion_step_t_GPU(system_old, system_new, D, dt, dx):
     """
     A GPU-parallelised iteration function of the diffusion system
     inputs:
@@ -82,22 +83,17 @@ def diffusion_step_GPU(system_old, system_new, D, dt, dx):
         nr = system_old[i, j + 1]
 
         # Boundary conditions
-        if i == 0:
-            nb = 0
-        elif i == system_old.shape[0] - 1:
-            nt = 1
         if j == 0:
-            nl = system_old[i, - 1]
-        elif j == system_old.shape[1] - 1:
+            nl = system_old[i, -1]
+        elif j == system_old.shape[0] - 1:
             nr = system_old[i, 0]
             
         # Update
         system_new[i, j] = (D * dt / (dx ** 2)) * (nb + nt + nl + nr - 4 * center) + center
-
-    if i == 0:
-        system_new[0, :] = 0
-    if j == system_old.shape[0] - 1:
-        system_new[-1, :] = 1
+    
+    # Set boundary conditions for top and bottom rows
+    if i == 0 or i == system_old.shape[1] - 1:
+        system_new[i, j] = system_old[i, j]
 
 
 def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run_GPU=False):
@@ -130,7 +126,7 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run
 
     # Determine number of frames
     n_frames = int(np.floor(t_max / dt)) + 1
-    print(f"Simulation will run for {n_frames} steps.")
+    print(f"Simulation running for {n_frames} steps.")
 
     # Array for storing lattice states
     u_evolution = np.zeros((n_save_frames + 1, N, N))
@@ -157,24 +153,25 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run
 
         # Compute next state
         if run_GPU:
+
             if t % 2 == 0:
-                diffusion_step_GPU[invoke_smart_kernel(N)](d_u_curr, d_u_next, D, dt, dx)
+                diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_u_curr, d_u_next, D, dt, dx)
 
                 # Save frame
                 if t % save_interval == 0:
                     u_evolution[save_ct] = d_u_next.copy_to_host()
+                    # print(u_evolution[save_ct][-2])
                     times[save_ct] = t * dt
                     save_ct += 1
                 
             else:
-                diffusion_step_GPU[invoke_smart_kernel(N)](d_u_next, d_u_curr, D, dt, dx)
+                diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_u_next, d_u_curr, D, dt, dx)
 
                 # Save frame
                 if t % save_interval == 0:
                     u_evolution[save_ct] = d_u_curr.copy_to_host()
                     times[save_ct] = t * dt
                     save_ct += 1
-                
             
         else:
             u_next = (D * dt / (dx ** 2)) * (u_curr_bottom + u_curr_top + u_curr_left + u_curr_right - 4 * u_curr_center) + u_curr_center

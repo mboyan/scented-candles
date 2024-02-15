@@ -148,22 +148,35 @@ def plot_lattice_map(N):
         N (int) - the size of the 
     """
 
-    xs = np.arange(N)
+    xs = np.arange(-1, N+1)
     ys = np.arange(N)
 
-    X, Y = np.meshgrid(xs, ys)
-
     fig, ax = plt.subplots()
+    fig.set_size_inches(4, 4)
+    ax.set_aspect('equal', 'box')
     
     # Plot vertical grid lines
-    for x in xs:
+    for x in xs[1:-1]:
         ax.plot([x, x], [ys[0], ys[-1]], color='black')
 
     # Plot horizontal grid lines
     for y in ys:
-        ax.plot([xs[0], xs[-1]], [y, y], color='black')
+        ax.plot([xs[0], xs[1]], [y, y], color='black', ls='--')
+        ax.plot([xs[1], xs[-2]], [y, y], color='black')
+        ax.plot([xs[-2], xs[-1]], [y, y], color='black', ls='--')
 
     # Plot dots at grid nodes
     for x in xs:
         for y in ys:
-            ax.scatter(x, y, color='red')
+            if y == 0:
+                col = 'b'
+            elif y == N-1:
+                col = 'y'
+            else:
+                col = 'w'
+            ax.scatter(x, y, color=col, marker='o', edgecolors='k')
+            ax.text(x+0.25/N, y+0.25/N, f'({x%N},{y})', ha='left', va='bottom', fontsize=8)
+    
+    ax.axis('off')
+    # ax.set_xticks([])
+    # ax.set_yticks([])
