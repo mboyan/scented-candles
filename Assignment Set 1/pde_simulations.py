@@ -71,27 +71,33 @@ def diffusion_step_GPU(system_old, system_new, D, dt, dx):
         system_old (GPU array) - the concentration values on the lattice before update;
         system_new (GPU array) - the concentration values on the lattice after update.
     """
-    row, col = cuda.grid(2) # get the position (row and column) on the grid
-    size = cuda.gridsize(2)
+    i, j = cuda.grid(2) # get the position (row and column) on the grid
 
-    center = system_old[row, col]
-    nt = system_old[row + 1, col]
-    nb = system_old[row - 1, col]
-    nl = system_old[row, col - 1]
-    nr = system_old[row, col + 1]
+    # Update everything but the end rows
+    if 0 < i < system_old.shape[0] - 1:
+        center = system_old[i, j]
+        nt = system_old[i + 1, j]
+        nb = system_old[i - 1, j]
+        nl = system_old[i, j - 1]
+        nr = system_old[i, j + 1]
 
-    # Boundary conditions
-    if row == 0:
-        nb = 0
-    elif row == size[0] - 1:
-        nt = 1
-    if col == 0:
-        nl = system_old[row, size[0] - 1]
-    elif col == size[1] - 1:
-        nr = system_old[row, 0]
-    
-    # Update
-    system_new[row, col] = (D * dt / (dx ** 2)) * (nb + nt + nl + nr - 4 * center) + center
+        # Boundary conditions
+        if i == 0:
+            nb = 0
+        elif i == system_old.shape[0] - 1:
+            nt = 1
+        if j == 0:
+            nl = system_old[i, - 1]
+        elif j == system_old.shape[1] - 1:
+            nr = system_old[i, 0]
+            
+        # Update
+        system_new[i, j] = (D * dt / (dx ** 2)) * (nb + nt + nl + nr - 4 * center) + center
+
+    if i == 0:
+        system_new[0, :] = 0
+    if j == system_old.shape[0] - 1:
+        system_new[-1, :] = 1
 
 
 def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run_GPU=False):
@@ -123,32 +129,26 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run
         print("Warning: inappropriate scaling of dx and dt, may result in an unstable simulation.")
 
     # Determine number of frames
-    n_frames = int(np.floor(t_max / dt))
+    n_frames = int(np.floor(t_max / dt)) + 1
+    print(f"Simulation will run for {n_frames} steps.")
 
     # Array for storing lattice states
-    u_evolution = np.empty((n_save_frames, N, N))
-    times = np.empty(n_save_frames)
+    u_evolution = np.zeros((n_save_frames + 1, N, N))
+    times = np.zeros(n_save_frames + 1)
     save_interval = np.floor(n_frames / n_save_frames)
     save_ct = 0
 
     # Initialise current state
     u_curr = np.array(u_init)
+    u_curr[-1, :] = 1
 
     # Send to device
     if run_GPU:
-        d_u_curr = cuda.to_device(u_curr[:, 1:-1])
-        d_u_next = cuda.to_device(u_curr[:, 1:-1])
+        d_u_curr = cuda.to_device(u_curr)
+        d_u_next = cuda.to_device(u_curr)
 
     for t in range(n_frames):
         
-        # Pad with 1s at the top and 0s at the bottom
-        # u_curr_padded = np.pad(u_curr, ((1, 1), (0, 0)), mode='constant', constant_values=((0, 1), (None, None)))
-        
-        # Get shifted arrays
-        # u_curr_bottom = u_curr_padded[:-2]
-        # u_curr_top = u_curr_padded[2:]
-        # u_curr_left = np.roll(u_curr, -1, axis=1)
-        # u_curr_right = np.roll(u_curr, 1, axis=1)
         u_curr_center = u_curr[1:-1,:]
         u_curr_bottom = u_curr[:-2,:]
         u_curr_top = u_curr[2:,:]
@@ -187,7 +187,7 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run
                 u_evolution[save_ct] = np.array(u_curr)
                 times[save_ct] = t * dt
                 save_ct += 1
-    
+
     return u_evolution, times
 
 

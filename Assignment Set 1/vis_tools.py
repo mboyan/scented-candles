@@ -70,7 +70,7 @@ def animate_diffusion(frames, times, interval=10):
     n_frames = times.shape[0]
 
     fig, ax = plt.subplots()
-    plot = ax.imshow(frames[0], vmin=0.0, vmax=1.0, origin='lower')
+    plot = ax.imshow(frames[0], vmin=0.0, vmax=1.0, origin='lower', cmap='plasma')
     time_txt = ax.text(0.05, 0.05, '', c='w', transform=ax.transAxes)
 
     def init_anim():
@@ -138,3 +138,32 @@ def plot_cylinder_topo(n_grid):
 
     ax.set_axis_off()
     plt.show()
+
+
+def plot_lattice_map(N):
+    """
+    Plots a schematic of a 2D lattice with a source at the top, a sink at the bottom
+    and a periodic condition along the x-axis.
+    inputs:
+        N (int) - the size of the 
+    """
+
+    xs = np.arange(N)
+    ys = np.arange(N)
+
+    X, Y = np.meshgrid(xs, ys)
+
+    fig, ax = plt.subplots()
+    
+    # Plot vertical grid lines
+    for x in xs:
+        ax.plot([x, x], [ys[0], ys[-1]], color='black')
+
+    # Plot horizontal grid lines
+    for y in ys:
+        ax.plot([xs[0], xs[-1]], [y, y], color='black')
+
+    # Plot dots at grid nodes
+    for x in xs:
+        for y in ys:
+            ax.scatter(x, y, color='red')
