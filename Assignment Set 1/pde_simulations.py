@@ -96,7 +96,7 @@ def diffusion_step_t_GPU(system_old, system_new, D, dt, dx):
         system_new[i, j] = system_old[i, j]
 
 
-def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run_GPU=False):
+def diffusion_system_time_dependent(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run_GPU=False):
     """
     Compute the evolution of a square lattice of concentration scalars
     based on the time-dependent diffusion equation
@@ -144,12 +144,6 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run
         d_u_next = cuda.to_device(u_curr)
 
     for t in range(n_frames):
-        
-        u_curr_center = u_curr[1:-1,:]
-        u_curr_bottom = u_curr[:-2,:]
-        u_curr_top = u_curr[2:,:]
-        u_curr_left = np.roll(u_curr, -1, axis=1)[1:-1,:]
-        u_curr_right = np.roll(u_curr, 1, axis=1)[1:-1,:]
 
         # Compute next state
         if run_GPU:
@@ -174,6 +168,12 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run
                     save_ct += 1
             
         else:
+            u_curr_center = u_curr[1:-1,:]
+            u_curr_bottom = u_curr[:-2,:]
+            u_curr_top = u_curr[2:,:]
+            u_curr_left = np.roll(u_curr, -1, axis=1)[1:-1,:]
+            u_curr_right = np.roll(u_curr, 1, axis=1)[1:-1,:]
+
             u_next = (D * dt / (dx ** 2)) * (u_curr_bottom + u_curr_top + u_curr_left + u_curr_right - 4 * u_curr_center) + u_curr_center
             
             # Update current array (apart from top and bottom row)
@@ -188,9 +188,43 @@ def diffusion_system(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run
     return u_evolution, times
 
 
-def verify_analytical(u_frame, t, D=1.0, precision_steps=1e6):
+def diffusion_system_non_time_dependent(u_init, n_iter, omega=None, gauss_seidel=False, n_save_frames=100, run_GPU=False):
+    """
+    Compute the evolution of a square lattice of diffusing concentration scalars
+    based on a time-independent Laplacian equation (Jacobi, Gauss-Seidel or SOR)
+    inputs:
+        u_init (numpy.ndarray) - the initial state of the lattice;
+        n_iter (int) - the number of iterations for the scheme;
+        omega (float) - if provided, a Successive Over-Relaxation is performed with relaxation parameter omega; defaults to None;
+        gauss_seidel (bool) - determines whether to modify the lattice in place (Gauss-Seidel iteration); defaults to False;
+        n_save_frames (int) - determines the number of frames to save during the simulation; detaults to 100;
+        run_GPU (bool) - determines whether the simulation runs on GPU.
+    outputs:
+        u_evolotion (numpy.ndarray) - the states of the lattice at all moments in time.
+    """
+
+    assert u_init.ndim == 2, 'input array must be 2-dimensional'
+    assert u_init.shape[0] == u_init.shape[1], 'lattice must have equal size along each dimension'
+    assert omega is None or 0 < omega < 2, 'omega parameter must be between 0 and 2 for stability'
+    assert type(n_iter) == 1, 'n_iter must be an integer'
+
+    # Determine number of lattice rows/columns
+    N = u_init.shape[0]
+
+    # Array for storing lattice states
+    u_evolution = np.zeros((n_save_frames + 1, N, N))
+
+    for i in n_iter:
+        
+        if run_GPU:
+            pass
+        else:
+            pass
+
+
+def verify_analytical_tdde(u_frame, t, D=1.0, precision_steps=1e6):
     """Computes the error between a numerical solution of
-    the diffusion equation and the analytical one based on the same parameters.
+    the time-dependent diffusion equation and the analytical one based on the same parameters.
     inputs:
         u_frame (numpy.ndarray) - the numerically computed simulation frame;
         t (float) - the time for which to compute the analytical solution;
