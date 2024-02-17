@@ -8,7 +8,7 @@ def vibrating_string(u_init, t_max, c=1.0, dt=0.001, L=1):
     for a given number of timesteps, starting from an inital state
     and assuming rest at time zero (no initial velocity).
     inputs:
-        u_init (numpy.ndarray) - the initial displacements along a discretised string;
+        c_init (numpy.ndarray) - the initial displacements along a discretised string;
         t_max (int) - a maximum number of iterations;
         c (float) - the physical constant for the string; defaults to 1.0;
         dt (float) - timestep; defaults to 0.001;
@@ -96,12 +96,12 @@ def diffusion_step_t_GPU(system_old, system_new, D, dt, dx):
         system_new[i, j] = system_old[i, j]
 
 
-def diffusion_system_time_dependent(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run_GPU=False):
+def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run_GPU=False):
     """
     Compute the evolution of a square lattice of concentration scalars
     based on the time-dependent diffusion equation
     inputs:
-        u_init (numpy.ndarray) - the initial state of the lattice;
+        c_init (numpy.ndarray) - the initial state of the lattice;
         t_max (int) - a maximum number of iterations;
         D (float) - the diffusion constant; defaults to 1;
         dt (float) - timestep; defaults to 0.001;
@@ -112,14 +112,14 @@ def diffusion_system_time_dependent(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_
         u_evolotion (numpy.ndarray) - the states of the lattice at all moments in time.
     """
 
-    assert u_init.ndim == 2, 'input array must be 2-dimensional'
-    assert u_init.shape[0] == u_init.shape[1], 'lattice must have equal size along each dimension'
+    assert c_init.ndim == 2, 'input array must be 2-dimensional'
+    assert c_init.shape[0] == c_init.shape[1], 'lattice must have equal size along each dimension'
 
     # Determine number of lattice rows/columns
-    N = u_init.shape[0]
+    N = c_init.shape[0]
 
     # Determine spatial increment
-    dx = L / u_init.shape[0]
+    dx = L / c_init.shape[0]
 
     if D * dt / (dx ** 2) > 0.5:
         print("Warning: inappropriate scaling of dx and dt, may result in an unstable simulation.")
@@ -129,19 +129,19 @@ def diffusion_system_time_dependent(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_
     print(f"Simulation running for {n_frames} steps.")
 
     # Array for storing lattice states
-    u_evolution = np.zeros((n_save_frames + 1, N, N))
+    c_evolution = np.zeros((n_save_frames + 1, N, N))
     times = np.zeros(n_save_frames + 1)
     save_interval = np.floor(n_frames / n_save_frames)
     save_ct = 0
 
     # Initialise current state
-    u_curr = np.array(u_init)
-    u_curr[-1, :] = 1
+    c_curr = np.array(c_init)
+    c_curr[-1, :] = 1
 
     # Send to device
     if run_GPU:
-        d_u_curr = cuda.to_device(u_curr)
-        d_u_next = cuda.to_device(u_curr)
+        d_c_curr = cuda.to_device(c_curr)
+        d_c_next = cuda.to_device(c_curr)
 
     for t in range(n_frames):
 
@@ -149,51 +149,51 @@ def diffusion_system_time_dependent(u_init, t_max, D=1.0, dt=0.001, L=1, n_save_
         if run_GPU:
 
             if t % 2 == 0:
-                diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_u_curr, d_u_next, D, dt, dx)
+                diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_c_curr, d_c_next, D, dt, dx)
 
                 # Save frame
                 if t % save_interval == 0:
-                    u_evolution[save_ct] = d_u_next.copy_to_host()
-                    # print(u_evolution[save_ct][-2])
+                    c_evolution[save_ct] = d_c_next.copy_to_host()
+                    # print(c_evolution[save_ct][-2])
                     times[save_ct] = t * dt
                     save_ct += 1
                 
             else:
-                diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_u_next, d_u_curr, D, dt, dx)
+                diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_c_next, d_c_curr, D, dt, dx)
 
                 # Save frame
                 if t % save_interval == 0:
-                    u_evolution[save_ct] = d_u_curr.copy_to_host()
+                    c_evolution[save_ct] = d_c_curr.copy_to_host()
                     times[save_ct] = t * dt
                     save_ct += 1
             
         else:
-            u_curr_center = u_curr[1:-1,:]
-            u_curr_bottom = u_curr[:-2,:]
-            u_curr_top = u_curr[2:,:]
-            u_curr_left = np.roll(u_curr, -1, axis=1)[1:-1,:]
-            u_curr_right = np.roll(u_curr, 1, axis=1)[1:-1,:]
+            c_curr_center = c_curr[1:-1,:]
+            c_curr_bottom = c_curr[:-2,:]
+            c_curr_top = c_curr[2:,:]
+            c_curr_left = np.roll(c_curr, -1, axis=1)[1:-1,:]
+            c_curr_right = np.roll(c_curr, 1, axis=1)[1:-1,:]
 
-            u_next = (D * dt / (dx ** 2)) * (u_curr_bottom + u_curr_top + u_curr_left + u_curr_right - 4 * u_curr_center) + u_curr_center
+            c_next = (D * dt / (dx ** 2)) * (c_curr_bottom + c_curr_top + c_curr_left + c_curr_right - 4 * c_curr_center) + c_curr_center
             
             # Update current array (apart from top and bottom row)
-            u_curr[1:-1, :] = np.array(u_next)
+            c_curr[1:-1, :] = np.array(c_next)
 
             # Save frame
             if t % save_interval == 0:
-                u_evolution[save_ct] = np.array(u_curr)
+                c_evolution[save_ct] = np.array(c_curr)
                 times[save_ct] = t * dt
                 save_ct += 1
 
-    return u_evolution, times
+    return c_evolution, times
 
 
-def diffusion_system_non_time_dependent(u_init, n_iter, omega=None, gauss_seidel=False, n_save_frames=100, run_GPU=False):
+def diffusion_system_non_time_dependent(c_init, n_iter, omega=None, gauss_seidel=False, n_save_frames=100, run_GPU=False):
     """
     Compute the evolution of a square lattice of diffusing concentration scalars
     based on a time-independent Laplacian equation (Jacobi, Gauss-Seidel or SOR)
     inputs:
-        u_init (numpy.ndarray) - the initial state of the lattice;
+        c_init (numpy.ndarray) - the initial state of the lattice;
         n_iter (int) - the number of iterations for the scheme;
         omega (float) - if provided, a Successive Over-Relaxation is performed with relaxation parameter omega; defaults to None;
         gauss_seidel (bool) - determines whether to modify the lattice in place (Gauss-Seidel iteration); defaults to False;
@@ -203,30 +203,63 @@ def diffusion_system_non_time_dependent(u_init, n_iter, omega=None, gauss_seidel
         u_evolotion (numpy.ndarray) - the states of the lattice at all moments in time.
     """
 
-    assert u_init.ndim == 2, 'input array must be 2-dimensional'
-    assert u_init.shape[0] == u_init.shape[1], 'lattice must have equal size along each dimension'
+    assert c_init.ndim == 2, 'input array must be 2-dimensional'
+    assert c_init.shape[0] == c_init.shape[1], 'lattice must have equal size along each dimension'
     assert omega is None or 0 < omega < 2, 'omega parameter must be between 0 and 2 for stability'
     assert type(n_iter) == 1, 'n_iter must be an integer'
 
     # Determine number of lattice rows/columns
-    N = u_init.shape[0]
+    N = c_init.shape[0]
 
     # Array for storing lattice states
-    u_evolution = np.zeros((n_save_frames + 1, N, N))
+    c_evolution = np.zeros((n_save_frames + 1, N, N))
 
-    for i in n_iter:
+    # Initialise current state
+    c_curr = np.array(c_init)
+    c_curr[-1, :] = 1
+
+    # Send to device
+    if run_GPU:
+        d_c_curr = cuda.to_device(c_curr)
+        if not gauss_seidel: 
+            d_c_next = cuda.to_device(c_curr)
+
+    for n in range(n_iter):
         
         if run_GPU:
             pass
         else:
-            pass
+            if gauss_seidel:
+                if omega is None:
+                    # Perform Gauss-Seidel Iteration
+                    for i in range(N):
+                        for j in range(1, N - 1):
+                            c_curr[i, j] = 0.25 * (c_curr[(i-1)%N, j] + c_curr[(i+1)%N, j] + c_curr[i, (j-1)%N] + c_curr[i, (j+1)%N])
+                else:
+                    # Perform SOR
+                    for i in range(N):
+                        for j in range(1, N - 1):
+                            c_curr[i, j] = omega * (c_curr[(i-1)%N, j] + c_curr[(i+1)%N, j] + c_curr[i, (j-1)%N] + c_curr[i, (j+1)%N]) / 4 + (1 - omega) * c_curr[i, j]
+            else:
+                c_curr_bottom = c_curr[:-2,:]
+                c_curr_top = c_curr[2:,:]
+                c_curr_left = np.roll(c_curr, -1, axis=1)[1:-1,:]
+                c_curr_right = np.roll(c_curr, 1, axis=1)[1:-1,:]
+
+                c_next = 0.25 * (c_curr_bottom + c_curr_top + c_curr_left + c_curr_right)
+                
+                # Update current array (apart from top and bottom row)
+                c_curr[1:-1, :] = np.array(c_next)
+
+    
+    return c_evolution
 
 
-def verify_analytical_tdde(u_frame, t, D=1.0, precision_steps=1e6):
+def verify_analytical_tdde(c_frame, t, D=1.0, precision_steps=1e6):
     """Computes the error between a numerical solution of
     the time-dependent diffusion equation and the analytical one based on the same parameters.
     inputs:
-        u_frame (numpy.ndarray) - the numerically computed simulation frame;
+        c_frame (numpy.ndarray) - the numerically computed simulation frame;
         t (float) - the time for which to compute the analytical solution;
         D (float) - the diffusion constant; defaults to 1;
         precision_steps (int) - the number of steps to use in the analytical solution; defaults to 1e6.
@@ -235,10 +268,10 @@ def verify_analytical_tdde(u_frame, t, D=1.0, precision_steps=1e6):
         error (numpy.ndarray) - the difference between the analytical solution and the numerical one.
     """
 
-    assert u_frame.ndim == 2, 'input array must be 2-dimensional'
-    assert u_frame.shape[0] == u_frame.shape[1], 'input array must have equal size along each dimension'
+    assert c_frame.ndim == 2, 'input array must be 2-dimensional'
+    assert c_frame.shape[0] == c_frame.shape[1], 'input array must have equal size along each dimension'
 
-    N = u_frame.shape[0]
+    N = c_frame.shape[0]
 
     # Initialise running sum of analytical terms
     running_sum = np.zeros(N)
@@ -254,6 +287,6 @@ def verify_analytical_tdde(u_frame, t, D=1.0, precision_steps=1e6):
     solution = np.tile(running_sum, (N, 1))
 
     # Calculate difference
-    error = solution - u_frame
+    error = solution - c_frame
 
     return solution, error
