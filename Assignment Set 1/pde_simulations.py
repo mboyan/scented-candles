@@ -188,31 +188,33 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
     return c_evolution, times
 
 
-def diffusion_system_non_time_dependent(c_init, n_iter, omega=None, gauss_seidel=False, n_save_frames=100, run_GPU=False):
+def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=1e5, omega=None, gauss_seidel=False, n_save_interval=100, run_GPU=False):
     """
     Compute the evolution of a square lattice of diffusing concentration scalars
     based on a time-independent Laplacian equation (Jacobi, Gauss-Seidel or SOR)
     inputs:
         c_init (numpy.ndarray) - the initial state of the lattice;
-        n_iter (int) - the number of iterations for the scheme;
+        delta_thresh (float) - the termination threshold for the maximum difference in concentrations between timesteps; defaults to 1e-5;
+        n_max_iter (int) - the maximum number of iterations for the scheme; defaults to 1e5;
         omega (float) - if provided, a Successive Over-Relaxation is performed with relaxation parameter omega; defaults to None;
         gauss_seidel (bool) - determines whether to modify the lattice in place (Gauss-Seidel iteration); defaults to False;
-        n_save_frames (int) - determines the number of frames to save during the simulation; detaults to 100;
+        n_save_interval (int) - interval at which frames are saved to the output array; detaults to 100;
         run_GPU (bool) - determines whether the simulation runs on GPU.
     outputs:
-        u_evolotion (numpy.ndarray) - the states of the lattice at all moments in time.
+        c_evolotion (numpy.ndarray) - the states of the lattice at all moments in time.
     """
 
     assert c_init.ndim == 2, 'input array must be 2-dimensional'
     assert c_init.shape[0] == c_init.shape[1], 'lattice must have equal size along each dimension'
     assert omega is None or 0 < omega < 2, 'omega parameter must be between 0 and 2 for stability'
-    assert type(n_iter) == 1, 'n_iter must be an integer'
+    assert type(n_max_iter) == 1, 'n_max_iter must be an integer'
 
     # Determine number of lattice rows/columns
     N = c_init.shape[0]
 
     # Array for storing lattice states
-    c_evolution = np.zeros((n_save_frames + 1, N, N))
+    c_evolution = np.empty((1, N, N))
+    c_evolution[0] = np.array(c_init)
 
     # Initialise current state
     c_curr = np.array(c_init)
@@ -224,22 +226,31 @@ def diffusion_system_non_time_dependent(c_init, n_iter, omega=None, gauss_seidel
         if not gauss_seidel: 
             d_c_next = cuda.to_device(c_curr)
 
-    for n in range(n_iter):
+    for n in range(n_max_iter):
         
         if run_GPU:
             pass
         else:
             if gauss_seidel:
+                delta = 0
                 if omega is None:
                     # Perform Gauss-Seidel Iteration
                     for i in range(N):
                         for j in range(1, N - 1):
+                            old_val = c_curr[i, j]
                             c_curr[i, j] = 0.25 * (c_curr[(i-1)%N, j] + c_curr[(i+1)%N, j] + c_curr[i, (j-1)%N] + c_curr[i, (j+1)%N])
+                            diff = np.abs(c_curr[i, j] - old_val)
+                            if diff > delta:
+                                delta = diff
                 else:
                     # Perform SOR
                     for i in range(N):
                         for j in range(1, N - 1):
+                            old_val = c_curr[i, j]
                             c_curr[i, j] = omega * (c_curr[(i-1)%N, j] + c_curr[(i+1)%N, j] + c_curr[i, (j-1)%N] + c_curr[i, (j+1)%N]) / 4 + (1 - omega) * c_curr[i, j]
+                            diff = np.abs(c_curr[i, j] - old_val)
+                            if diff > delta:
+                                delta = diff
             else:
                 c_curr_bottom = c_curr[:-2,:]
                 c_curr_top = c_curr[2:,:]
@@ -247,12 +258,24 @@ def diffusion_system_non_time_dependent(c_init, n_iter, omega=None, gauss_seidel
                 c_curr_right = np.roll(c_curr, 1, axis=1)[1:-1,:]
 
                 c_next = 0.25 * (c_curr_bottom + c_curr_top + c_curr_left + c_curr_right)
+
+                # Calculate max difference
+                delta = np.max(np.abs(c_curr[1:-1, :] - c_next))
                 
                 # Update current array (apart from top and bottom row)
                 c_curr[1:-1, :] = np.array(c_next)
+            
+            if n % n_save_interval == 0:
+                c_evolution = np.append(c_evolution, c_curr, axis=0)
 
+            if delta < threshold:
+                break
     
-    return c_evolution
+    # Save last frame
+    if n % n_save_interval != 0:
+        c_evolution = np.append(c_evolution, c_curr, axis=0)
+
+    return c_evolution, n
 
 
 def verify_analytical_tdde(c_frame, t, D=1.0, precision_steps=1e6):
