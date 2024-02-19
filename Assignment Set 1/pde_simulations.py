@@ -188,7 +188,7 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
     return c_evolution, times
 
 
-def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=1e5, omega=None, gauss_seidel=False, n_save_interval=100, run_GPU=False):
+def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=int(1e5), omega=None, gauss_seidel=False, n_save_interval=100, run_GPU=False):
     """
     Compute the evolution of a square lattice of diffusing concentration scalars
     based on a time-independent Laplacian equation (Jacobi, Gauss-Seidel or SOR)
@@ -207,7 +207,7 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=1e
     assert c_init.ndim == 2, 'input array must be 2-dimensional'
     assert c_init.shape[0] == c_init.shape[1], 'lattice must have equal size along each dimension'
     assert omega is None or 0 < omega < 2, 'omega parameter must be between 0 and 2 for stability'
-    assert type(n_max_iter) == 1, 'n_max_iter must be an integer'
+    assert type(n_max_iter) == int, 'n_max_iter must be an integer'
 
     # Determine number of lattice rows/columns
     N = c_init.shape[0]
@@ -235,8 +235,8 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=1e
                 delta = 0
                 if omega is None:
                     # Perform Gauss-Seidel Iteration
-                    for i in range(N):
-                        for j in range(1, N - 1):
+                    for i in range(1, N - 1):
+                        for j in range(N):
                             old_val = c_curr[i, j]
                             c_curr[i, j] = 0.25 * (c_curr[(i-1)%N, j] + c_curr[(i+1)%N, j] + c_curr[i, (j-1)%N] + c_curr[i, (j+1)%N])
                             diff = np.abs(c_curr[i, j] - old_val)
@@ -244,8 +244,8 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=1e
                                 delta = diff
                 else:
                     # Perform SOR
-                    for i in range(N):
-                        for j in range(1, N - 1):
+                    for i in range(1, N - 1):
+                        for j in range(N):
                             old_val = c_curr[i, j]
                             c_curr[i, j] = omega * (c_curr[(i-1)%N, j] + c_curr[(i+1)%N, j] + c_curr[i, (j-1)%N] + c_curr[i, (j+1)%N]) / 4 + (1 - omega) * c_curr[i, j]
                             diff = np.abs(c_curr[i, j] - old_val)
@@ -266,14 +266,14 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=1e
                 c_curr[1:-1, :] = np.array(c_next)
             
             if n % n_save_interval == 0:
-                c_evolution = np.append(c_evolution, c_curr, axis=0)
+                c_evolution = np.append(c_evolution, c_curr[np.newaxis, :, :], axis=0)
 
-            if delta < threshold:
+            if delta < delta_thresh:
                 break
     
     # Save last frame
     if n % n_save_interval != 0:
-        c_evolution = np.append(c_evolution, c_curr, axis=0)
+        c_evolution = np.append(c_evolution, c_curr[np.newaxis, :, :], axis=0)
 
     return c_evolution, n
 

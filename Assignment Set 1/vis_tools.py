@@ -100,46 +100,6 @@ def animate_diffusion(frames, times, interval=10):
     return HTML(anim.to_html5_video())
 
 
-def plot_cylinder_topo(n_grid):
-    """
-    Illustrate a cylindrical grid topology in a 3D plot
-    input:
-        n_grid (int) - number of grid cells in each dimension
-    """
-    
-    ax = plt.subplot(projection='3d')
-    ax.view_init(elev=60, azim=10)
-
-    angles = np.linspace(0, 2*np.pi, n_grid)
-    xs = np.cos(angles)
-    ys = np.sin(angles)
-    zs = np.linspace(0, 3, n_grid)
-
-    xs_grid, zs_grid = np.meshgrid(xs, zs)
-    ys_grid, _ = np.meshgrid(ys, zs)
-    vals = np.full(zs_grid.shape, np.nan)
-    # vals = np.zeros(zs_grid.shape)
-    vals[:1,:] = 0
-    vals[-2:,:] = 1
-
-    colors = plt.cm.viridis(vals)
-
-    ax.plot([1.01, 1.01], [0, 0], [0, 3], c='r', linewidth=5.0)
-    ax.plot_surface(xs_grid, ys_grid, zs_grid, cmap='viridis', facecolors=colors, alpha=0.5)
-    ax.set_aspect('equal', 'box')
-
-    for i in range(vals.shape[0]-1):
-        for j in range(vals.shape[1]-1):
-            ax.text(0.5*(xs_grid[i,j] + xs_grid[i+1,j+1]),
-                    0.5*(ys_grid[i,j] + ys_grid[i+1,j+1]),
-                    0.5*(zs_grid[i,j] + zs_grid[i+1,j+1]),
-                    f'{i}, {j}', ha='center', va='center', color='r', fontsize=8,
-                    bbox=dict(boxstyle="square,pad=0.3", fc="white", ec="k", lw=1, alpha=0.75))
-
-    ax.set_axis_off()
-    plt.show()
-
-
 def plot_lattice_map(N):
     """
     Plots a schematic of a 2D lattice with a source at the top, a sink at the bottom
@@ -180,3 +140,34 @@ def plot_lattice_map(N):
     ax.axis('off')
     # ax.set_xticks([])
     # ax.set_yticks([])
+
+
+def plot_error_convergence(c_frames_list, labels):
+    """
+    Plots the convergence of the average error between the numerical solution
+    of the diffusion equation on a single-periodic, source-to-sink lattice
+    and the analytical solution c(y) = y for multiple iteration strategies
+    inputs:
+        c_frames (list of numpy.ndarray) - a list containint the series of simulation frames for each strategy
+        labels (list of str) - a list of graph labels
+    """
+
+    assert type(c_frames_list) == list, 'input must be list of numpy arrays'
+    assert len(labels) == len(c_frames_list), 'mismatching number of labels'
+    
+    fig, ax = plt.subplots()
+    fig.set_size_inches(4, 4)
+    ax.set_xlabel('k')
+    ax.set_ylabel(r'$|y - c_i,j^k|, \forall i \in [0, N] $')
+
+    for i, c_frames in enumerate(c_frames_list):
+        an_sol = np.tile(np.linspace(0, 1, c_frames.shape[2]), (c_frames.shape[0], c_frames.shape[1], 1))
+        an_sol = np.moveaxis(an_sol, 1, 2)
+        error = np.mean(np.abs(c_frames - an_sol), axis=(1, 2))
+        
+        ax.plot(error, label=labels[i])
+
+    ax.legend(fontsize='small')
+    ax.grid()
+
+    plt.show()
