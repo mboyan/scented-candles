@@ -144,7 +144,7 @@ def plot_lattice_map(N):
 
 def plot_error_convergence(c_frames_list, labels):
     """
-    Plots the convergence of the average error between the numerical solution
+    Plots the convergence of the maximum error between the numerical solution
     of the diffusion equation on a single-periodic, source-to-sink lattice
     and the analytical solution c(y) = y for multiple iteration strategies
     inputs:
@@ -157,15 +157,44 @@ def plot_error_convergence(c_frames_list, labels):
     
     fig, ax = plt.subplots()
     fig.set_size_inches(4, 4)
-    ax.set_xlabel('k')
-    ax.set_ylabel(r'$|y - c_i,j^k|, \forall i \in [0, N] $')
+    ax.set_xlabel('$k$')
+    ax.set_ylabel(r'$\max_{i,j}|y - c_{i,j}^k|$')
 
     for i, c_frames in enumerate(c_frames_list):
         an_sol = np.tile(np.linspace(0, 1, c_frames.shape[2]), (c_frames.shape[0], c_frames.shape[1], 1))
         an_sol = np.moveaxis(an_sol, 1, 2)
-        error = np.mean(np.abs(c_frames - an_sol), axis=(1, 2))
+        error = np.max(np.abs(c_frames - an_sol), axis=(1, 2))
         
-        ax.plot(error, label=labels[i])
+        ax.semilogy(error, label=labels[i])
+
+    ax.legend(fontsize='small')
+    ax.grid()
+
+    plt.show()
+
+
+def plot_delta_convergence(c_frames_list, labels):
+    """
+    Plots the convergence of the difference between iterations
+    of the diffusion equation on a single-periodic, source-to-sink lattice
+    and the analytical solution c(y) = y for multiple iteration strategies
+    inputs:
+        c_frames (list of numpy.ndarray) - a list containint the series of simulation frames for each strategy
+        labels (list of str) - a list of graph labels
+    """
+
+    assert type(c_frames_list) == list, 'input must be list of numpy arrays'
+    assert len(labels) == len(c_frames_list), 'mismatching number of labels'
+    
+    fig, ax = plt.subplots()
+    fig.set_size_inches(4, 4)
+    ax.set_xlabel('$k$')
+    ax.set_ylabel('$\delta$')
+
+    for i, c_frames in enumerate(c_frames_list):
+        delta = np.max(c_frames[1:] - c_frames[:-1], axis=(1, 2))
+        
+        ax.semilogy(delta, label=labels[i])
 
     ax.legend(fontsize='small')
     ax.grid()

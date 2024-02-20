@@ -67,10 +67,13 @@ def invoke_smart_kernel(size, threads_per_block=(16,16)):
 @cuda.jit()
 def diffusion_step_t_GPU(system_old, system_new, D, dt, dx):
     """
-    A GPU-parallelised iteration function of the diffusion system
+    A GPU-parallelised iteration function of the time-dependent diffusion system
     inputs:
         system_old (GPU array) - the concentration values on the lattice before update;
         system_new (GPU array) - the concentration values on the lattice after update.
+        D (float) - the diffusion constant;
+        dt (float) - time interval;
+        dx (float) - space interval
     """
     i, j = cuda.grid(2) # get the position (row and column) on the grid
 
@@ -85,14 +88,45 @@ def diffusion_step_t_GPU(system_old, system_new, D, dt, dx):
         # Boundary conditions
         if j == 0:
             nl = system_old[i, -1]
-        elif j == system_old.shape[0] - 1:
+        elif j == system_old.shape[1] - 1:
             nr = system_old[i, 0]
             
         # Update
         system_new[i, j] = (D * dt / (dx ** 2)) * (nb + nt + nl + nr - 4 * center) + center
     
     # Set boundary conditions for top and bottom rows
-    if i == 0 or i == system_old.shape[1] - 1:
+    elif i == 0 or i == system_old.shape[0] - 1:
+        system_new[i, j] = system_old[i, j]
+
+
+@cuda.jit()
+def diffusion_step_jacobi_GPU(system_old, system_new):
+    """
+    A GPU-parallelised Jacobi iteration function
+    inputs:
+        system_old (GPU array) - the concentration values on the lattice before update;
+        system_new (GPU array) - the concentration values on the lattice after update.
+    """
+    i, j = cuda.grid(2) # get the position (row and column) on the grid
+
+    # Update everything but the end rows
+    if 0 < i < system_old.shape[0] - 1:
+        nt = system_old[i + 1, j]
+        nb = system_old[i - 1, j]
+        nl = system_old[i, j - 1]
+        nr = system_old[i, j + 1]
+
+        # Boundary conditions
+        if j == 0:
+            nl = system_old[i, -1]
+        elif j == system_old.shape[1] - 1:
+            nr = system_old[i, 0]
+            
+        # Update
+        system_new[i, j] = 0.25 * (nb + nt + nl + nr)
+    
+    # Set boundary conditions for top and bottom rows
+    elif i == 0 or i == system_old.shape[0] - 1:
         system_new[i, j] = system_old[i, j]
 
 
@@ -154,7 +188,6 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
                 # Save frame
                 if t % save_interval == 0:
                     c_evolution[save_ct] = d_c_next.copy_to_host()
-                    # print(c_evolution[save_ct][-2])
                     times[save_ct] = t * dt
                     save_ct += 1
                 
@@ -188,7 +221,7 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
     return c_evolution, times
 
 
-def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=int(1e5), omega=None, gauss_seidel=False, n_save_interval=100, run_GPU=False):
+def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=int(1e5), omega=None, gauss_seidel=False, save_interval=100, delta_interval=10, run_GPU=False):
     """
     Compute the evolution of a square lattice of diffusing concentration scalars
     based on a time-independent Laplacian equation (Jacobi, Gauss-Seidel or SOR)
@@ -198,7 +231,8 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
         n_max_iter (int) - the maximum number of iterations for the scheme; defaults to 1e5;
         omega (float) - if provided, a Successive Over-Relaxation is performed with relaxation parameter omega; defaults to None;
         gauss_seidel (bool) - determines whether to modify the lattice in place (Gauss-Seidel iteration); defaults to False;
-        n_save_interval (int) - interval at which frames are saved to the output array; detaults to 100;
+        save_interval (int) - interval between saving frames to the output array; detaults to 100;
+        delta_interval (int) - interval between calculating convergence; defaults to 10;
         run_GPU (bool) - determines whether the simulation runs on GPU.
     outputs:
         c_evolotion (numpy.ndarray) - the states of the lattice at all moments in time.
@@ -206,7 +240,7 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
 
     assert c_init.ndim == 2, 'input array must be 2-dimensional'
     assert c_init.shape[0] == c_init.shape[1], 'lattice must have equal size along each dimension'
-    assert omega is None or 0 < omega < 2, 'omega parameter must be between 0 and 2 for stability'
+    assert omega is None or 0 < omega <= 2, 'omega parameter must be between 0 and 2 for stability'
     assert type(n_max_iter) == int, 'n_max_iter must be an integer'
 
     # Determine number of lattice rows/columns
@@ -229,7 +263,25 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
     for n in range(n_max_iter):
         
         if run_GPU:
-            pass
+            if gauss_seidel:
+                # Perform parallel Gauss-Seidel Iteration
+                pass
+            else:
+                # Perform parallel Jacobi Iteration
+                if n % 2 == 0:
+                    diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_c_curr, d_c_next)
+                    if n % save_interval == 0 or n % delta_interval == 0:
+                        c_curr = d_c_next.copy_to_host()
+                    elif (n + 1) % delta_interval == 0:
+                        c_prev = d_c_next.copy_to_host()
+                else:
+                    diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_c_next, d_c_curr)
+                    if n % save_interval == 0 or n % delta_interval == 0:
+                        c_curr = d_c_curr.copy_to_host()
+                    elif (n + 1) % delta_interval == 0:
+                        c_prev = d_c_curr.copy_to_host()
+            # Halting condition
+            delta = np.max(np.abs(c_curr - c_prev))
         else:
             if gauss_seidel:
                 delta = 0
@@ -252,6 +304,7 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
                             if diff > delta:
                                 delta = diff
             else:
+                # Perform Jacobi Iteration
                 c_curr_bottom = c_curr[:-2,:]
                 c_curr_top = c_curr[2:,:]
                 c_curr_left = np.roll(c_curr, -1, axis=1)[1:-1,:]
@@ -265,14 +318,14 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
                 # Update current array (apart from top and bottom row)
                 c_curr[1:-1, :] = np.array(c_next)
             
-            if n % n_save_interval == 0:
+            if n % save_interval == 0:
                 c_evolution = np.append(c_evolution, c_curr[np.newaxis, :, :], axis=0)
 
             if delta < delta_thresh:
                 break
     
     # Save last frame
-    if n % n_save_interval != 0:
+    if n % save_interval != 0:
         c_evolution = np.append(c_evolution, c_curr[np.newaxis, :, :], axis=0)
 
     return c_evolution, n
