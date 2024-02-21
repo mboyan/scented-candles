@@ -2,6 +2,7 @@ import numpy as np
 from scipy.special import erfc
 from numba import jit, cuda
 
+# ==== Wave Equation ====
 def vibrating_string(u_init, t_max, c=1.0, dt=0.001, L=1):
     """
     Compute the evolution of the vibration amplitude of a string
@@ -53,7 +54,7 @@ def vibrating_string(u_init, t_max, c=1.0, dt=0.001, L=1):
     
     return u_evolution
 
-
+# ==== Diffusion Equation: Parallelisation ====
 def invoke_smart_kernel(size, threads_per_block=(16,16)):
     """
     Invokes kernel size parameters (number of blocks and number of threads per block).
@@ -100,14 +101,19 @@ def diffusion_step_t_GPU(system_old, system_new, D, dt, dx):
 
 
 @cuda.jit()
-def diffusion_step_jacobi_GPU(system_old, system_new):
+def diffusion_step_jacobi_GPU(system_old, system_new, objects=None):
     """
     A GPU-parallelised Jacobi iteration function.
     inputs:
         system_old (GPU array) - the concentration values on the lattice before update;
         system_new (GPU array) - the concentration values on the lattice after update.
+        objects (GPU array) - the lattice with initialised objects.
     """
     i, j = cuda.grid(2) # get the position (row and column) on the grid
+
+    # update_toggle = True
+    # if objects is not None:
+    #     if
 
     # Update everything but the end rows
     if 0 < i < system_old.shape[0] - 1:
@@ -166,6 +172,7 @@ def diffusion_step_gauss_seidel_GPU(system_A, system_B, red, omega=1):
         system_A[i, j] = system_A[i, j]
 
 
+# ==== Diffusion Equation =====
 def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run_GPU=False):
     """
     Compute the evolution of a square lattice of concentration scalars
@@ -257,7 +264,7 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
     return c_evolution, times
 
 
-def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=int(1e5), omega=None, gauss_seidel=False, save_interval=100, delta_interval=10, run_GPU=False):
+def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=int(1e5), omega=None, gauss_seidel=False, save_interval=100, delta_interval=10, run_GPU=False, objects=None):
     """
     Compute the evolution of a square lattice of diffusing concentration scalars
     based on a time-independent Laplacian equation (Jacobi, Gauss-Seidel or SOR).
@@ -269,7 +276,8 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
         gauss_seidel (bool) - determines whether to modify the lattice in place (Gauss-Seidel iteration); defaults to False;
         save_interval (int) - interval between saving frames to the output array; detaults to 100;
         delta_interval (int) - interval between calculating convergence; defaults to 10;
-        run_GPU (bool) - determines whether the simulation runs on GPU.
+        run_GPU (bool) - determines whether the simulation runs on GPU;
+        objects (numpy.ndarray) - the lattice with initialised objects.
     outputs:
         c_evolotion (numpy.ndarray) - the states of the lattice at all moments in time.
     """
@@ -371,6 +379,10 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
                 # Update current array (apart from top and bottom row)
                 c_curr[1:-1, :] = np.array(c_next)
             
+            # Overwrite objects
+            if objects is not None:
+                c_curr = np.where(objects != 0, objects, c_curr)
+            
         if n % save_interval == 0:
             c_evolution = np.append(c_evolution, c_curr[np.newaxis, :, :], axis=0)
 
@@ -383,6 +395,33 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
         c_evolution = np.append(c_evolution, c_curr[np.newaxis, :, :], axis=0)
 
     return c_evolution, n
+
+
+def init_lattice_object(c_base, center, size, type='rectangle', const_val=0.0):
+    """
+    Initialises regions on a lattice with special behaviour (sinks, sources).
+    inputs:
+        c_base (numpy.ndarray) - the initial state of the lattice;
+        center (numpy.ndarray) - the coordinates of the center of the object;
+        size (float) - the size of the object (radius for circles, half-side for rectangles);
+        type (str) - the geometry of the region; can be one of the following: 'rectangle', 'circle'; defaults to 'rectangle';
+        const_val (float) - the value that will be permanently assigned to the region; defaults to 0.0 (sink);
+    outputs:
+        c_objects (numpy.ndarray) - the lattice with the object initialised.
+    """
+
+    assert c_base.ndim == 2, 'input lattice array must be 2-dimensional'
+    assert center.ndim == 1, 'center coordinates must be a 1D array'
+    assert center.shape[0] == 2, 'center can only have 2 coordinates (x, y)'
+
+    c_objects = np.full_like(c_base, np.nan)
+
+    if type == 'rectangle':
+        c_objects[center[0] - size:center[0] + size, center[1] - size:center[1] + size] = const_val
+    # elif type == 'circle':
+    #     c_objects = np.where(np.linalg_norm(c_objects - center, axis) <= size, const_val, c_objects)
+    
+    return c_objects
 
 
 def verify_analytical_tdde(c_frame, t, D=1.0, precision_steps=1e6):
