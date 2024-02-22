@@ -66,15 +66,17 @@ def invoke_smart_kernel(size, threads_per_block=(16,16)):
 
 
 @cuda.jit()
-def diffusion_step_t_GPU(system_old, system_new, D, dt, dx):
+def diffusion_step_t_GPU(system_old, system_new, D, dt, dx, isolators, use_isolators):
     """
     A GPU-parallelised iteration function of the time-dependent diffusion system.
     inputs:
-        system_old (GPU array) - the concentration values on the lattice before update;
-        system_new (GPU array) - the concentration values on the lattice after update.
+        system_old (DeviceNDArray) - the concentration values on the lattice before update;
+        system_new (DeviceNDArray) - the concentration values on the lattice after update.
         D (float) - the diffusion constant;
         dt (float) - time interval;
-        dx (float) - space interval
+        dx (float) - space interval;
+        isolators (DeviceNDArray) - the lattice with initialised isolators;
+        use_isolators (bool) - determines whether to use the isolators array.
     """
     i, j = cuda.grid(2) # get the position (row and column) on the grid
 
@@ -93,7 +95,17 @@ def diffusion_step_t_GPU(system_old, system_new, D, dt, dx):
             nr = system_old[i, 0]
             
         # Update
-        system_new[i, j] = (D * dt / (dx ** 2)) * (nb + nt + nl + nr - 4 * center) + center
+        if use_isolators:
+            dtop = isolators[i + 1, j]
+            dbottom = isolators[i - 1, j]
+            dleft = isolators[i, j - 1]
+            dright = isolators[i, j + 1]
+            system_new[i, j] = (D * dt / (dx ** 2)) * (dtop * (nt - center)
+                                                       + dbottom * (nb - center)
+                                                       + dleft * (nl - center)
+                                                       +dright * (nr - center)) + center
+        else:
+            system_new[i, j] = (D * dt / (dx ** 2)) * (nb + nt + nl + nr - 4 * center) + center
     
     # Set boundary conditions for top and bottom rows
     elif i == 0 or i == system_old.shape[0] - 1:
@@ -145,10 +157,10 @@ def diffusion_step_gauss_seidel_GPU(system_A, system_B, red, objects, use_object
     A GPU-parallelised Gauss-Seidel iteration function using two interlaced
     half-lattices arranged in a checkerboard pattern.
     inputs:
-        system_A (GPU array) - the concentration values on the lattice before update;
-        system_B (GPU array) - the concentration values on the lattice after update;
+        system_A (DeviceNDArray) - the concentration values on the lattice before update;
+        system_B (DeviceNDArray) - the concentration values on the lattice after update;
         red (bool) - determines whether to red or black squares are updated (red occupies top left corner)
-        objects (GPU array) - the lattice with initialised objects;
+        objects (DeviceNDArray) - the lattice with initialised objects;
         use_objects (bool) - determines whether to use the objects array;
         omega (float) - the relaxation parameter; if not 1, SOR is performed; defaults to 1;
     """
@@ -184,7 +196,7 @@ def diffusion_step_gauss_seidel_GPU(system_A, system_B, red, objects, use_object
 
 
 # ==== Diffusion Equation =====
-def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run_GPU=False):
+def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_frames=100, run_GPU=False, isolators=None):
     """
     Compute the evolution of a square lattice of concentration scalars
     based on the time-dependent diffusion equation.
@@ -195,13 +207,16 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
         dt (float) - timestep; defaults to 0.001;
         L (float) - the length of the lattice along one dimension; defaults to 1;
         n_save_frames (int) - determines the number of frames to save during the simulation; detaults to 100;
-        run_GPU (bool) - determines whether the simulation runs on GPU.
+        run_GPU (bool) - determines whether the simulation runs on GPU;
+        isolators (numpy.ndarray) - the lattice with initialised isolators; defaults to None.
     outputs:
         u_evolotion (numpy.ndarray) - the states of the lattice at all moments in time.
     """
 
     assert c_init.ndim == 2, 'input array must be 2-dimensional'
     assert c_init.shape[0] == c_init.shape[1], 'lattice must have equal size along each dimension'
+    if isolators is not None:
+        assert isolators.shape == c_init.shape, 'isolators array must have the same shape as the lattice'
 
     # Determine number of lattice rows/columns
     N = c_init.shape[0]
@@ -226,10 +241,18 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
     c_curr = np.array(c_init)
     c_curr[-1, :] = 1
 
+    # Determine whether to use isolators in GPU
+    if isolators is not None:
+        use_isolators = True
+    else:
+        use_isolators = False
+        isolators = np.full_like(c_curr, 1)
+
     # Send to device
     if run_GPU:
         d_c_curr = cuda.to_device(c_curr)
         d_c_next = cuda.to_device(c_curr)
+        d_isolators = cuda.to_device(isolators)
 
     for t in range(n_frames):
 
@@ -237,7 +260,7 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
         if run_GPU:
 
             if t % 2 == 0:
-                diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_c_curr, d_c_next, D, dt, dx)
+                diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_c_curr, d_c_next, D, dt, dx, d_isolators, use_isolators)
 
                 # Save frame
                 if t % save_interval == 0:
@@ -246,7 +269,7 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
                     save_ct += 1
                 
             else:
-                diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_c_next, d_c_curr, D, dt, dx)
+                diffusion_step_t_GPU[invoke_smart_kernel((N, N))](d_c_next, d_c_curr, D, dt, dx, d_isolators, use_isolators)
 
                 # Save frame
                 if t % save_interval == 0:
@@ -260,8 +283,18 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
             c_curr_top = c_curr[2:,:]
             c_curr_left = np.roll(c_curr, -1, axis=1)[1:-1,:]
             c_curr_right = np.roll(c_curr, 1, axis=1)[1:-1,:]
-
-            c_next = (D * dt / (dx ** 2)) * (c_curr_bottom + c_curr_top + c_curr_left + c_curr_right - 4 * c_curr_center) + c_curr_center
+            
+            if use_isolators:
+                d_bottom = isolators[:-2,:]
+                d_top = isolators[2:,:]
+                d_left = np.roll(isolators, -1, axis=1)[1:-1,:]
+                d_right = np.roll(isolators, 1, axis=1)[1:-1,:]
+                c_next = (D * dt / (dx ** 2)) * (d_top * (c_curr_top - c_curr_center)
+                                                 + d_bottom * (c_curr_bottom - c_curr_center)
+                                                 + d_left * (c_curr_left - c_curr_center)
+                                                 + d_right * (c_curr_right - c_curr_center)) + c_curr_center
+            else:
+                c_next = (D * dt / (dx ** 2)) * (c_curr_bottom + c_curr_top + c_curr_left + c_curr_right - 4 * c_curr_center) + c_curr_center
             
             # Update current array (apart from top and bottom row)
             c_curr[1:-1, :] = np.array(c_next)
@@ -298,6 +331,8 @@ def diffusion_system_time_independent(c_init, delta_thresh=1e-5, n_max_iter=int(
     assert c_init.shape[0] == c_init.shape[1], 'lattice must have equal size along each dimension'
     assert omega is None or 0 < omega <= 2, 'omega parameter must be between 0 and 2 for stability'
     assert type(n_max_iter) == int, 'n_max_iter must be an integer'
+    if objects is not None:
+        assert objects.shape == c_init.shape, 'objects array must have the same shape as the lattice'
 
     # Determine number of lattice rows/columns
     N = c_init.shape[0]
@@ -491,11 +526,11 @@ def init_lattice_d_params(c_base, center, size, type='square'):
             for i in range(-1, 2):
                 for j in range(-1, 2):
                     if not (i == 0 and j == 0):
-                        c_objects *= init_lattice_object(c_objects, center + np.array([i, j]) * size / 3, size / 3, type='sierpinski carpet')
+                        c_objects *= init_lattice_d_params(c_objects, center + np.array([i, j]) * size / 3, size / 3, type='sierpinski carpet')
                     else:
-                        c_objects *= init_lattice_object(c_objects, center + np.array([i, j]) * size / 3, size / 6, type='square')
+                        c_objects *= init_lattice_d_params(c_objects, center + np.array([i, j]) * size / 3, size / 6, type='square')
         else:
-            c_objects = init_lattice_object(c_objects, center, size / 3, type='square')
+            c_objects = init_lattice_d_params(c_objects, center, size / 3, type='square')
     return c_objects
 
 
