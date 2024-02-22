@@ -101,22 +101,25 @@ def diffusion_step_t_GPU(system_old, system_new, D, dt, dx):
 
 
 @cuda.jit()
-def diffusion_step_jacobi_GPU(system_old, system_new, objects=None):
+def diffusion_step_jacobi_GPU(system_old, system_new, objects, use_objects):
     """
     A GPU-parallelised Jacobi iteration function.
     inputs:
-        system_old (GPU array) - the concentration values on the lattice before update;
-        system_new (GPU array) - the concentration values on the lattice after update.
-        objects (GPU array) - the lattice with initialised objects.
+        system_old (DeviceNDArray) - the concentration values on the lattice before update;
+        system_new (DeviceNDArray) - the concentration values on the lattice after update;
+        objects (DeviceNDArray) - the lattice with initialised objects;
+        use_objects (bool) - determines whether to use the objects array.
     """
     i, j = cuda.grid(2) # get the position (row and column) on the grid
 
-    # update_toggle = True
-    # if objects is not None:
-    #     if
+    # Determine whether to use objects
+    update_toggle = True
+    if use_objects:
+        if objects[i, j] == objects[i, j]: # Check for NaN
+            update_toggle = False
 
     # Update everything but the end rows
-    if 0 < i < system_old.shape[0] - 1:
+    if 0 < i < system_old.shape[0] - 1 and update_toggle:
         nt = system_old[i + 1, j]
         nb = system_old[i - 1, j]
         nl = system_old[i, j - 1]
@@ -132,25 +135,33 @@ def diffusion_step_jacobi_GPU(system_old, system_new, objects=None):
         system_new[i, j] = 0.25 * (nb + nt + nl + nr)
     
     # Set boundary conditions for top and bottom rows
-    elif i == 0 or i == system_old.shape[0] - 1:
+    elif i == 0 or i == system_old.shape[0] - 1 or not update_toggle:
         system_new[i, j] = system_old[i, j]
 
 
 @cuda.jit()
-def diffusion_step_gauss_seidel_GPU(system_A, system_B, red, omega=1):
+def diffusion_step_gauss_seidel_GPU(system_A, system_B, red, objects, use_objects, omega=1):
     """
     A GPU-parallelised Gauss-Seidel iteration function using two interlaced
     half-lattices arranged in a checkerboard pattern.
     inputs:
         system_A (GPU array) - the concentration values on the lattice before update;
         system_B (GPU array) - the concentration values on the lattice after update;
-        omega (float) - the relaxation parameter; if not 1, SOR is performed; defaults to 1;
         red (bool) - determines whether to red or black squares are updated (red occupies top left corner)
+        objects (GPU array) - the lattice with initialised objects;
+        use_objects (bool) - determines whether to use the objects array;
+        omega (float) - the relaxation parameter; if not 1, SOR is performed; defaults to 1;
     """
     i, j = cuda.grid(2) # get the position (row and column) on the grid
 
+    # Determine whether to use objects
+    update_toggle = True
+    if use_objects:
+        if objects[i, j] == objects[i, j]: # Check for NaN
+            update_toggle = False
+
     # Update everything but the end rows
-    if 0 < i < system_A.shape[0] - 1:
+    if 0 < i < system_A.shape[0] - 1 and update_toggle:
         nt = system_B[i + 1, j]
         nb = system_B[i - 1, j]
 
@@ -168,7 +179,7 @@ def diffusion_step_gauss_seidel_GPU(system_A, system_B, red, omega=1):
             system_A[i, j] = omega * (nb + nt + nl + nr) / 4 + (1 - omega) * system_A[i, j]
     
     # Set boundary conditions for top and bottom rows
-    elif i == 0 or i == system_A.shape[0] - 1:
+    elif i == 0 or i == system_A.shape[0] - 1 or not update_toggle:
         system_A[i, j] = system_A[i, j]
 
 
@@ -264,7 +275,8 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
     return c_evolution, times
 
 
-def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=int(1e5), omega=None, gauss_seidel=False, save_interval=100, delta_interval=10, run_GPU=False, objects=None):
+def diffusion_system_time_independent(c_init, delta_thresh=1e-5, n_max_iter=int(1e5), omega=None, gauss_seidel=False,
+                                      save_interval=100, delta_interval=10, run_GPU=False, objects=None):
     """
     Compute the evolution of a square lattice of diffusing concentration scalars
     based on a time-independent Laplacian equation (Jacobi, Gauss-Seidel or SOR).
@@ -300,15 +312,27 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
 
     c_prev = np.full_like(c_curr, 1e6)
 
+    # Determine whether to use objects in GPU
+    if objects is not None:
+        use_objects = True
+        # Add object values to initial state
+        c_curr = np.where(np.isnan(objects), c_curr, objects)
+    else:
+        use_objects = False
+        objects = np.full_like(c_curr, np.nan)
+
     # Send to device
     if run_GPU:
         if not gauss_seidel:
             d_c_curr = cuda.to_device(c_curr)
             d_c_next = cuda.to_device(c_curr)
+            d_objects = cuda.to_device(objects)
         else:
             # Create interlaced half-lattices
             d_c_red = cuda.to_device(np.ascontiguousarray(c_curr[:, ::2]))
             d_c_black = cuda.to_device(np.ascontiguousarray(c_curr[:, 1::2]))
+            d_objects_red = cuda.to_device(np.ascontiguousarray(objects[:, ::2]))
+            d_objects_black = cuda.to_device(np.ascontiguousarray(objects[:, 1::2]))
 
     for n in range(n_max_iter):
 
@@ -319,8 +343,8 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
                     omega_input = 1
                 else:
                     omega_input = omega
-                diffusion_step_gauss_seidel_GPU[invoke_smart_kernel((N, N//2))](d_c_red, d_c_black, True, omega_input)
-                diffusion_step_gauss_seidel_GPU[invoke_smart_kernel((N, N//2))](d_c_black, d_c_red, False, omega_input)
+                diffusion_step_gauss_seidel_GPU[invoke_smart_kernel((N, N//2))](d_c_red, d_c_black, True, d_objects_red, use_objects, omega_input)
+                diffusion_step_gauss_seidel_GPU[invoke_smart_kernel((N, N//2))](d_c_black, d_c_red, False, d_objects_black, use_objects, omega_input)
                 if n % save_interval == 0:
                     c_curr[:, ::2] = d_c_red.copy_to_host()
                     c_curr[:, 1::2] = d_c_black.copy_to_host()
@@ -330,13 +354,13 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
             else:
                 # Perform parallel Jacobi Iteration
                 if n % 2 == 0:
-                    diffusion_step_jacobi_GPU[invoke_smart_kernel((N, N))](d_c_curr, d_c_next)
+                    diffusion_step_jacobi_GPU[invoke_smart_kernel((N, N))](d_c_curr, d_c_next, d_objects, use_objects)
                     if n % save_interval == 0 or n % delta_interval == 0:
                         c_curr = d_c_next.copy_to_host()
                     elif (n + 1) % delta_interval == 0:
                         c_prev = d_c_next.copy_to_host()
                 else:
-                    diffusion_step_jacobi_GPU[invoke_smart_kernel((N, N))](d_c_next, d_c_curr)
+                    diffusion_step_jacobi_GPU[invoke_smart_kernel((N, N))](d_c_next, d_c_curr, d_objects, use_objects)
                     if n % save_interval == 0 or n % delta_interval == 0:
                         c_curr = d_c_curr.copy_to_host()
                     elif (n + 1) % delta_interval == 0:
@@ -381,7 +405,7 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
             
             # Overwrite objects
             if objects is not None:
-                c_curr = np.where(objects != 0, objects, c_curr)
+                c_curr = np.where(np.isnan(objects), c_curr, objects)
             
         if n % save_interval == 0:
             c_evolution = np.append(c_evolution, c_curr[np.newaxis, :, :], axis=0)
@@ -397,30 +421,81 @@ def diffusion_system_non_time_dependent(c_init, delta_thresh=1e-5, n_max_iter=in
     return c_evolution, n
 
 
-def init_lattice_object(c_base, center, size, type='rectangle', const_val=0.0):
+def init_lattice_object(c_base, center, size, type='square', const_val=0.0):
     """
     Initialises regions on a lattice with special behaviour (sinks, sources).
     inputs:
         c_base (numpy.ndarray) - the initial state of the lattice;
         center (numpy.ndarray) - the coordinates of the center of the object;
         size (float) - the size of the object (radius for circles, half-side for rectangles);
-        type (str) - the geometry of the region; can be one of the following: 'rectangle', 'circle'; defaults to 'rectangle';
+        type (str) - the geometry of the region; can be one of the following: 'square', 'circle' or 'sierpinski carpet'; defaults to 'rectangle';
         const_val (float) - the value that will be permanently assigned to the region; defaults to 0.0 (sink);
     outputs:
         c_objects (numpy.ndarray) - the lattice with the object initialised.
     """
-
+    # print(size)
     assert c_base.ndim == 2, 'input lattice array must be 2-dimensional'
     assert center.ndim == 1, 'center coordinates must be a 1D array'
     assert center.shape[0] == 2, 'center can only have 2 coordinates (x, y)'
 
-    c_objects = np.full_like(c_base, np.nan)
+    c_objects = np.where(c_base == 0, np.nan, c_base)
 
-    if type == 'rectangle':
-        c_objects[center[0] - size:center[0] + size, center[1] - size:center[1] + size] = const_val
-    # elif type == 'circle':
-    #     c_objects = np.where(np.linalg_norm(c_objects - center, axis) <= size, const_val, c_objects)
-    
+    if type == 'square':
+        c_objects[int(center[0]) - int(size):int(center[0]) + int(size), int(center[1]) - int(size):int(center[1]) + int(size)] = const_val
+    elif type == 'circle':
+        # Get coordinates of all points in the lattice
+        coords = np.array(np.meshgrid(np.arange(c_base.shape[0]), np.arange(c_base.shape[1]))).T
+        c_objects = np.where(np.linalg.norm(coords - np.tile(center, (c_objects.shape[0], c_objects.shape[1], 1)), axis=2) <= size, const_val, c_objects)
+    elif type == 'sierpinski carpet':
+        if size > 18:
+            for i in range(-1, 2):
+                for j in range(-1, 2):
+                    if not (i == 0 and j == 0):
+                        c_subdiv = init_lattice_object(c_objects, center + np.array([i, j]) * size / 3, size / 3, type='sierpinski carpet', const_val=const_val)
+                        c_objects = np.where(np.isnan(c_subdiv), c_objects, c_subdiv)
+                    else:
+                        c_subdiv = init_lattice_object(c_objects, center + np.array([i, j]) * size / 3, size / 6, type='square', const_val=const_val)
+                        c_objects = np.where(np.isnan(c_subdiv), c_objects, c_subdiv)
+        else:
+            c_objects = init_lattice_object(c_objects, center, size / 3, type='square', const_val=const_val)
+    return c_objects
+
+
+def init_lattice_d_params(c_base, center, size, type='square'):
+    """
+    Initialises regions on a lattice with insulating or conducting behaviour.
+    inputs:
+        c_base (numpy.ndarray) - the initial state of the lattice;
+        center (numpy.ndarray) - the coordinates of the center of the object;
+        size (float) - the size of the object (radius for circles, half-side for rectangles);
+        type (str) - the geometry of the region; can be one of the following: 'square', 'circle' or 'sierpinski carpet'; defaults to 'rectangle';
+        const_val (float) - the value that will be permanently assigned to the region; defaults to 0.0 (sink);
+    outputs:
+        c_objects (numpy.ndarray) - the lattice with the object initialised.
+    """
+    # print(size)
+    assert c_base.ndim == 2, 'input lattice array must be 2-dimensional'
+    assert center.ndim == 1, 'center coordinates must be a 1D array'
+    assert center.shape[0] == 2, 'center can only have 2 coordinates (x, y)'
+
+    c_objects = np.full_like(c_base, 1)
+
+    if type == 'square':
+        c_objects[int(center[0]) - int(size):int(center[0]) + int(size), int(center[1]) - int(size):int(center[1]) + int(size)] = 0
+    elif type == 'circle':
+        # Get coordinates of all points in the lattice
+        coords = np.array(np.meshgrid(np.arange(c_base.shape[0]), np.arange(c_base.shape[1]))).T
+        c_objects = np.where(np.linalg.norm(coords - np.tile(center, (c_objects.shape[0], c_objects.shape[1], 1)), axis=2) <= size, 0, c_objects)
+    elif type == 'sierpinski carpet':
+        if size > 18:
+            for i in range(-1, 2):
+                for j in range(-1, 2):
+                    if not (i == 0 and j == 0):
+                        c_objects *= init_lattice_object(c_objects, center + np.array([i, j]) * size / 3, size / 3, type='sierpinski carpet')
+                    else:
+                        c_objects *= init_lattice_object(c_objects, center + np.array([i, j]) * size / 3, size / 6, type='square')
+        else:
+            c_objects = init_lattice_object(c_objects, center, size / 3, type='square')
     return c_objects
 
 
