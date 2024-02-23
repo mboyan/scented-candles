@@ -33,7 +33,8 @@ def animate_strings(frames, times, interval=10):
             time_txt[j].set_text('')
             axs[j].set_xlabel('$x$')
             axs[j].set_ylabel('$u(x,t)$')
-            axs[j].set_title(f'Init. condition {j}')
+            axs[j].set_title(f'Init. condition {j+1}')
+            axs[j].grid()
         return *plots, *time_txt
 
     def update(i):
@@ -157,7 +158,7 @@ def plot_error_convergence(c_frames_list, labels):
     
     fig, ax = plt.subplots()
     fig.set_size_inches(4, 4)
-    ax.set_xlabel('$k$')
+    ax.set_xlabel('Iterations $n$')
     ax.set_ylabel(r'$\max_{i,j}|y - c_{i,j}^k|$')
 
     for i, c_frames in enumerate(c_frames_list):
@@ -188,7 +189,7 @@ def plot_delta_convergence(c_frames_list, labels):
     
     fig, ax = plt.subplots()
     fig.set_size_inches(4, 4)
-    ax.set_xlabel('$k$')
+    ax.set_xlabel('Iterations $n$')
     ax.set_ylabel('$\delta$')
 
     for i, c_frames in enumerate(c_frames_list):

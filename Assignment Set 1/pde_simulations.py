@@ -100,7 +100,7 @@ def diffusion_step_t_GPU(system_old, system_new, D, dt, dx, isolators, use_isola
             dbottom = isolators[i - 1, j]
             dleft = isolators[i, j - 1]
             dright = isolators[i, j + 1]
-            system_new[i, j] = (D * dt / (dx ** 2)) * (dtop * (nt - center)
+            system_new[i, j] = (dt / (dx ** 2)) * (dtop * (nt - center)
                                                        + dbottom * (nb - center)
                                                        + dleft * (nl - center)
                                                        +dright * (nr - center)) + center
@@ -289,7 +289,7 @@ def diffusion_system_time_dependent(c_init, t_max, D=1.0, dt=0.001, L=1, n_save_
                 d_top = isolators[2:,:]
                 d_left = np.roll(isolators, -1, axis=1)[1:-1,:]
                 d_right = np.roll(isolators, 1, axis=1)[1:-1,:]
-                c_next = (D * dt / (dx ** 2)) * (d_top * (c_curr_top - c_curr_center)
+                c_next = (dt / (dx ** 2)) * (d_top * (c_curr_top - c_curr_center)
                                                  + d_bottom * (c_curr_bottom - c_curr_center)
                                                  + d_left * (c_curr_left - c_curr_center)
                                                  + d_right * (c_curr_right - c_curr_center)) + c_curr_center
