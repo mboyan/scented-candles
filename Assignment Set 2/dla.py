@@ -25,18 +25,47 @@ def run_dla_diff_equation(size, max_iter, omega, eta, run_GPU=False):
     # Place initial seed
     cluster_grid = np.full((size, size), np.nan)
     occupied_indices = np.array([[size//2, 0]])
-    cluster_grid[occupied_indices.T] = 0
-    print(cluster_grid)
+    cluster_grid[tuple(occupied_indices.T)] = 0
     c_grid = np.where(np.isnan(cluster_grid), c_grid, 0)
+
+    # Construct neighbourhood stencil
+    offsets = [[i, j] for i in range(-1, 2) for j in range(-1, 2) if abs(i) != abs(j)]
 
     # Growth loop
     for n in range(max_iter):
-        pass
+        
+        # Determine growth candidates
+        growth_candidate_indices = set()
+        for offset in offsets:
+            
+            # Get neighbour indices
+            nbrs = occupied_indices + np.tile(offset, (occupied_indices.shape[0], 1))
+
+            # Disregard out-of-bounds neighbours
+            mask = np.all(nbrs >= 0, axis=1) & np.all(nbrs < size, axis=1)
+            nbrs = nbrs[mask]
+
+            growth_candidate_indices = growth_candidate_indices | set(map(tuple, nbrs))
+            growth_candidate_indices -= set(map(tuple, occupied_indices))
+        
+        # Get candidate concentrations
+        growth_candidate_indices = list(growth_candidate_indices)
+        c_candidates = c_grid[tuple(np.array(growth_candidate_indices).T)]
+
+        # Determine probabilities
+        growth_ps = c_candidates / np.sum(c_candidates)
+
+        # Select growth candidate
+        growth_site_index = np.random.choice(len(growth_candidate_indices), p=growth_ps)
+        print(occupied_indices)
+        print( np.array(growth_candidate_indices[growth_site_index]))
+        occupied_indices = np.append(occupied_indices, np.array([growth_candidate_indices[growth_site_index]]), axis=0)
+        print(occupied_indices)
 
     return
 
 
-def run_dla_random_walk():
+def run_dla_random_walk(size):
     """
     Performs Diffusion Limited Aggregation (DLA) using random walks.
     """
