@@ -378,8 +378,10 @@ def diffusion_system_time_independent(c_init, delta_thresh=1e-5, n_max_iter=int(
                     omega_input = 1
                 else:
                     omega_input = omega
-                diffusion_step_gauss_seidel_GPU[invoke_smart_kernel((N, N//2))](d_c_red, d_c_black, True, d_objects_red, use_objects, omega_input)
-                diffusion_step_gauss_seidel_GPU[invoke_smart_kernel((N, N//2))](d_c_black, d_c_red, False, d_objects_black, use_objects, omega_input)
+                if n % 2 == 0:
+                    diffusion_step_gauss_seidel_GPU[invoke_smart_kernel((N, N//2))](d_c_red, d_c_black, True, d_objects_red, use_objects, omega_input)
+                elif (n + 1) % delta_interval == 0:
+                    diffusion_step_gauss_seidel_GPU[invoke_smart_kernel((N, N//2))](d_c_black, d_c_red, False, d_objects_black, use_objects, omega_input)
                 if n % save_interval == 0:
                     c_curr[:, ::2] = d_c_red.copy_to_host()
                     c_curr[:, 1::2] = d_c_black.copy_to_host()
