@@ -1,7 +1,9 @@
 import numpy as np
+import pandas as pd
 from numba import jit, cuda
+from scipy.optimize import minimize_scalar
 
-
+# ===== Iteration functions =====
 def growth_iteration(c_grid, occupied_indices, eta, offsets):
     """
     Pick a growth site and update the indices of
@@ -46,17 +48,25 @@ def growth_iteration(c_grid, occupied_indices, eta, offsets):
     return occupied_indices
 
 
-@cuda.jit
-def diffusion_step_sor_GPU(system_A, system_B, red, cluster_grid, omega):
+def invoke_smart_kernel(size, threads_per_block=(16,16)):
+    """
+    Invokes kernel size parameters (number of blocks and number of threads per block).
+    """
+    blocks_per_grid = tuple([(s + tpb - 1) // tpb for s, tpb in zip(size, threads_per_block)])
+
+    return blocks_per_grid, threads_per_block
+
+
+@cuda.jit()
+def diffusion_step_SOR_GPU(system_A, system_B, red, cluster_grid, omega):
     """
     A GPU-parallelised Gauss-Seidel iteration function using two interlaced
     half-lattices arranged in a checkerboard pattern.
     arguments:
-        system_A (DeviceNDArray) - the concentration values on the lattice before update.
-        system_B (DeviceNDArray) - the concentration values on the lattice after update.
-        red (bool) - determines whether to red or black squares are updated (red occupies top left corner).
+        system_A (DeviceNDArray) - the concentration values on the lattice to update.
+        system_B (DeviceNDArray) - the concentration values on the lattice to reference.
+        red (bool) - determines whether the red or black squares are updated (red occupies top left corner).
         cluster_grid (DeviceNDArray) - the lattice with the DLA cluster values (NaN for unoccupied sites).
-        use_objects (bool) - determines whether to use the objects array.
         omega (float) - the relaxation parameter.
     """
     i, j = cuda.grid(2) # get the position (row and column) on the grid
@@ -67,8 +77,8 @@ def diffusion_step_sor_GPU(system_A, system_B, red, cluster_grid, omega):
     else:
         update_toggle = True
 
-    # Update everything but the end rows
-    if 0 < i < system_A.shape[0] - 1 and update_toggle:
+    # Update everything but the end rows and out-of-bounds squares
+    if 0 < i < system_A.shape[0] - 1 and 0 <= j < system_A.shape[1] and update_toggle:
         nt = system_B[i + 1, j]
         nb = system_B[i - 1, j]
 
@@ -80,17 +90,13 @@ def diffusion_step_sor_GPU(system_A, system_B, red, cluster_grid, omega):
             nr = system_B[i, (j + 1) % system_A.shape[1]]
             
         # Update
-        if omega == 1:
-            system_A[i, j] = 0.25 * (nb + nt + nl + nr)
-        else:
-            system_A[i, j] = 0.25 * omega * (nb + nt + nl + nr) + (1 - omega) * system_A[i, j]
-    
-    # Set boundary conditions for top and bottom rows
-    elif i == 0 or i == system_A.shape[0] - 1 or not update_toggle:
-        system_A[i, j] = system_A[i, j]
+        system_A[i, j] = 0.25 * omega * (nb + nt + nl + nr) + (1 - omega) * system_A[i, j]
+
+        # Clamp to zero
+        system_A[i, j] = max(0, system_A[i, j])
 
 
-def diffusion_sor(c_grid, cluster_grid, omega, delta_thresh=1e-5, max_iter=int(1e5), GPU_delta_interval=None):
+def diffusion_SOR(c_grid, cluster_grid, omega, delta_thresh=1e-5, max_iter=int(1e5), GPU_delta_interval=None):
     """
     Compute the diffusion of the concentration grid using the
     Successive Over-Relaxation (SOR) method.
@@ -105,49 +111,70 @@ def diffusion_sor(c_grid, cluster_grid, omega, delta_thresh=1e-5, max_iter=int(1
         c_grid (ndarray): The updated concentration grid.
     """
 
-    N = c_grid.shape[0]
+    size = c_grid.shape[0]
 
     # Set sink and source rows
     c_grid[0, :] = 0
     c_grid[-1, :] = 1
 
+    # Previous grid placeholder
+    c_grid_prev = np.array(c_grid)
+
     if GPU_delta_interval is not None:
         run_GPU = True
         d_c_red = cuda.to_device(np.ascontiguousarray(c_grid[:, ::2]))
         d_c_black = cuda.to_device(np.ascontiguousarray(c_grid[:, 1::2]))
+        d_cluster_red = cuda.to_device(np.ascontiguousarray(cluster_grid[:, ::2]))
+        d_cluster_black = cuda.to_device(np.ascontiguousarray(cluster_grid[:, 1::2]))
+        delta = 1e6
     else:
         run_GPU = False
 
+    
     for n in range(max_iter):
 
         # Compute the next iteration
         if not run_GPU:
             delta = 0
-            for i in range(1, N - 1):
-                for j in range(N):
+            for i in range(1, size - 1):
+                for j in range(size):
                     if cluster_grid[i, j] != cluster_grid[i, j]: # Check for NaN
                         old_val = c_grid[i, j]
-                        c_grid[i, j] = (1 - omega) * c_grid[i, j] + 0.25 * omega * (c_grid[(i-1)%N, j] + c_grid[(i+1)%N, j] + c_grid[i, (j-1)%N] + c_grid[i, (j+1)%N])
-                        if c_grid[i, j] < 0:
-                            print("Here's what happened:", i, j, c_grid[i, j], old_val)
-                            print("Top neighbour:", c_grid[(i-1)%N, j])
-                            print("Bottom neighbour:", c_grid[(i+1)%N, j])
-                            print("Left neighbour:", c_grid[i, (j-1)%N])
-                            print("Right neighbour:", c_grid[i, (j+1)%N])
-                            print("Neighbour average:", 0.25 * (c_grid[(i-1)%N, j] + c_grid[(i+1)%N, j] + c_grid[i, (j-1)%N] + c_grid[i, (j+1)%N]))
+                        nbr_sum = (c_grid[(i-1)%size, j] + c_grid[(i+1)%size, j] + c_grid[i, (j-1)%size] + c_grid[i, (j+1)%size])
+                        c_grid[i, j] = (1 - omega) * c_grid[i, j] + 0.25 * omega * nbr_sum
+                        # Clamp to zero
+                        c_grid[i, j] = max(0, c_grid[i, j])
                         diff = np.abs(c_grid[i, j] - old_val)
                         if diff > delta:
                             delta = diff
-
-            # Check for convergence
-            if delta < delta_thresh:
-                break
         else:
-            pass
+            # Alternate between black and red squares
+            if n % 2 == 0:
+                diffusion_step_SOR_GPU[invoke_smart_kernel((size, size//2))](d_c_red, d_c_black, True, d_cluster_red, omega)
+            else:
+                diffusion_step_SOR_GPU[invoke_smart_kernel((size, size//2))](d_c_black, d_c_red, False, d_cluster_black, omega)
+            
+            # Check for convergence
+            if n % GPU_delta_interval == 0:
+                c_grid[:, ::2] = d_c_red.copy_to_host()
+                c_grid[:, 1::2] = d_c_black.copy_to_host()
+                if n > 0:
+                    delta = np.max(np.abs(c_grid - c_grid_prev))
+            elif (n + 1) % GPU_delta_interval == 0 :
+                c_grid_prev[:, ::2] = d_c_red.copy_to_host()	
+                c_grid_prev[:, 1::2] = d_c_black.copy_to_host()
+        
+         # Check for convergence
+        if (not run_GPU or (run_GPU and n % GPU_delta_interval == 0)) and delta < delta_thresh:
+            break
 
-    return c_grid
+    if n == max_iter - 1:
+        print(f"Loop terminated before convergence at delta={delta}")
+
+    return c_grid, n
 
 
+# ===== Main DLA functions =====
 def run_dla_diff_equation(size, max_iter, omega, eta, GPU_delta_interval=None):
     """
     Performs Diffusion Limited Aggregation (DLA) using probabilities
@@ -158,6 +185,9 @@ def run_dla_diff_equation(size, max_iter, omega, eta, GPU_delta_interval=None):
         omega (float): The relaxation factor.
         eta (float): The shape parameter for the DLA cluster.
         GPU_delta_interval (int): The interval at which to check for convergence on the GPU. If None, the CPU is used.
+    returns:
+        c_grid (ndarray): The concentration grid.
+        cluster_grid (ndarray): The DLA cluster grid.
     """
 
     # Initialize the concentration grid (linear gradient from top to bottom)
@@ -172,6 +202,9 @@ def run_dla_diff_equation(size, max_iter, omega, eta, GPU_delta_interval=None):
     # Construct neighbourhood stencil
     offsets = [[i, j] for i in range(-1, 2) for j in range(-1, 2) if abs(i) != abs(j)]
 
+    # Array for storing the number of diffusion diffusion iterations
+    diff_n_maxs = np.empty(max_iter)
+
     # Growth loop
     for n in range(max_iter):
 
@@ -181,9 +214,9 @@ def run_dla_diff_equation(size, max_iter, omega, eta, GPU_delta_interval=None):
         
         # Update concentrations
         c_grid = np.where(np.isnan(cluster_grid), c_grid, 0)
-        c_grid = diffusion_sor(c_grid, cluster_grid, omega, GPU_delta_interval=None)
+        c_grid, diff_n_maxs = diffusion_SOR(c_grid, cluster_grid, omega, GPU_delta_interval=GPU_delta_interval)
 
-    return c_grid
+    return c_grid, cluster_grid, diff_n_maxs
 
 
 def run_dla_random_walk(size):
@@ -192,3 +225,113 @@ def run_dla_random_walk(size):
     """
 
     return
+
+
+# ===== Simulation and analysis utilities =====
+def dla_omega_optimiser(omega, size, max_iter, eta, random_seed, GPU_delta_interval):
+    """
+    Utility function for optimising omega with respect to the
+    minimum number of diffusion iterations at each growth step.
+    arguments:
+        omega (float): The relaxation factor.
+        size (int): The size of the grid.
+        max_iter (int): The maximum number of iterations.
+        eta (float): The shape parameter for the DLA cluster.
+        random_seed (int): A random seed for consistent results.
+        GPU_delta_interval (int): The interval at which to check for convergence on the GPU. If None, the CPU is used.
+    returns:
+        The norm of the vector of diffusion iteraction counts throughout the DLA growth.
+    """
+
+    np.random.seed(random_seed)
+
+    _, _, diff_n_maxs = run_dla_diff_equation(size, max_iter, omega, eta, GPU_delta_interval)
+
+    return np.linalg.norm(diff_n_maxs)
+
+
+def dla_fractal_dimension(cluster_grid, seed):
+    """
+    Computes the fractal dimension of a DLA cluster by
+    counting its mass within successive radii from the initial seed
+    and performing a linear regression through log(r) and log(M).
+    arguments:
+        cluster_grid (ndarray): The lattice with the DLA cluster values (NaN for unoccupied sites).
+        seed (ndarray): An array of shape (2,) containing the (x, y) coordinates of the initial seed
+    returns:
+    """
+
+    assert seed.ndim == 1, 'seed must be a 1D array'
+    assert seed.shape[0] == 2, 'seed must consist of 2 coordinates'
+
+    cluster_coords = np.argwhere(np.logical_not(np.isnan(cluster_grid)))
+
+    # Compute radii
+    radii = np.linalg.norm(cluster_coords - np.tile(seed[np.newaxis, :], (cluster_coords.shape[0], 1)), axis=1)
+    radii = radii[radii > 0]
+    
+    # Compute masses
+    masses = np.empty_like(radii)
+    for i, r in enumerate(radii):
+        masses[i] = np.sum(np.where(radii <= r, 1, 0))
+    
+    # Fit line
+    log_radii = np.log(radii)
+    log_masses = np.log(masses)
+    coeffs = np.polyfit(log_radii, log_masses, 1)
+
+    # Slope is fractal dimension
+    fract_dim = coeffs[0]
+
+    return fract_dim
+
+
+def run_dla_params(size, max_iter, eta_range, n_sims, GPU_delta_interval=50):
+    """
+    Runs multiple DLA simulations with different eta parameters
+    using GPU acceleration.
+    arguments:
+        size (int): The size of the grid.
+        max_iter (int): The maximum number of iterations.
+        eta (float): The shape parameter for the DLA cluster.
+        n_sims (int): The number of simulations per parameter value.
+        GPU_delta_interval (int): The interval at which to check for convergence on the GPU. If None, the CPU is used.
+    returns:
+        df_sim_results (DataFrame): The results from the simulation series.
+    """
+
+    c_grids = np.empty((eta_range.shape[0], n_sims, size, size))
+    cluster_grids = np.empty_like(c_grids)
+
+    # DataFrame for saving simulation results
+    df_sim_results = pd.DataFrame(columns=['sim_id', '$\eta$', '$\omega$', '$D_r$'])
+
+    for i, eta in enumerate(eta_range):
+        
+        print(f"Running parameter eta = {eta}")
+
+        for n in range(n_sims):
+
+            sim_id = i * n_sims + n
+
+            print(f"Running simulation {sim_id + 1}/{n_sims * eta_range.shape[0]}")
+
+            random_seed = 11 + sim_id
+            np.random.seed(random_seed)
+            
+            # Find optimal omega
+            min_result = minimize_scalar(dla_omega_optimiser, bounds=(1.8, 1.999), args=(size, max_iter, eta, random_seed, GPU_delta_interval))
+            omega = min_result.x
+
+            # Rerun with optimal omega
+            c_grid, cluster_grid, _ = run_dla_diff_equation(size, max_iter, omega, eta, GPU_delta_interval=50)
+            c_grids[i, n] = np.array(c_grid)
+            cluster_grids[i, n] = np.array(cluster_grid)
+
+            # Compute fractal dimension
+            fract_dim = dla_fractal_dimension(cluster_grid, np.array([0, size//2]))
+
+            # Save results
+            df_sim_results = pd.concat([df_sim_results, pd.DataFrame([{'sim_id': sim_id, '$\eta$': eta, '$\omega$': omega, '$D_r$': fract_dim}])])
+    
+    return df_sim_results, c_grids, cluster_grids
