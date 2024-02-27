@@ -174,6 +174,49 @@ def diffusion_SOR(c_grid, cluster_grid, omega, delta_thresh=1e-5, max_iter=int(1
     return c_grid, n
 
 
+def run_walker(cluster_grid, offsets):
+    """
+    Perform a random walk from the top of the lattice
+    until the DLA cluster is reached.
+    arguments:
+        cluster_grid (ndarray): The lattice with the DLA cluster values (NaN for unoccupied sites).
+        offsets (ndarray): The neighbourhood stencil.
+    """
+    
+    pos = np.array([cluster_grid.shape[0] - 1, np.random.randint(0, cluster_grid.shape[1])]) # actually need to make sure there's no cluster on the top row
+
+    max_steps = np.prod(cluster_grid.shape)
+
+    for _ in range(max_steps):
+        
+        # Get neighbour indices
+        nbrs = pos + offsets
+
+        # Check for occupied neighbours
+        mask = np.isnan(cluster_grid[tuple(nbrs.T)])
+
+        # # Return if no unoccupied neighbours
+        # if np.sum(mask) == 0:
+        #     return
+
+        # Add position to grid and return
+        if np.prod(mask) == 0:
+            cluster_grid[tuple(pos)] = 0
+            return
+
+        # nbrs = nbrs[mask]
+
+        # Wrap around x
+        nbrs[:, 1] = np.mod(nbrs[:, 1], cluster_grid.shape[1])
+
+        # Move to a random neighbour
+        pos = nbrs[np.random.choice(nbrs.shape[0])]
+
+        # Return if beyond top or bottom row
+        if pos[0] < 0 or pos[0] >= cluster_grid.shape[0]:
+            return
+
+
 # ===== Main DLA functions =====
 def run_dla_diff_equation(size, max_iter, omega, eta, GPU_delta_interval=None):
     """
@@ -206,7 +249,7 @@ def run_dla_diff_equation(size, max_iter, omega, eta, GPU_delta_interval=None):
     diff_n_maxs = np.empty(max_iter)
 
     # Growth loop
-    for n in range(max_iter):
+    for _ in range(max_iter):
 
         # Update occupied sites
         occupied_indices = growth_iteration(c_grid, occupied_indices, eta, offsets)
@@ -219,10 +262,22 @@ def run_dla_diff_equation(size, max_iter, omega, eta, GPU_delta_interval=None):
     return c_grid, cluster_grid, diff_n_maxs
 
 
-def run_dla_random_walk(size):
+def run_dla_monte_carlo(size, max_iter, ps):
     """
     Performs Diffusion Limited Aggregation (DLA) using random walks.
     """
+
+    # Place initial seed
+    cluster_grid = np.full((size, size), np.nan)
+    occupied_indices = np.array([[0, size//2]])
+    cluster_grid[tuple(occupied_indices.T)] = 0
+    c_grid = np.where(np.isnan(cluster_grid), c_grid, 0)
+
+    # Growth loop
+    for _ in range(max_iter):
+
+        # Random walk
+        pass
 
     return
 
