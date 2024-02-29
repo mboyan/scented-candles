@@ -19,7 +19,7 @@ def plot_dla_diffusion(c_grid, cluster_grid, ax=None, title=None):
 
     grid_combined = np.where(np.isnan(cluster_grid), c_grid, np.nan)
 
-    plt.imshow(grid_combined, cmap='plasma', origin='lower')
+    ax.imshow(grid_combined, cmap='plasma', origin='lower')
 
     if title is not None:
         ax.set_title(title)
@@ -28,7 +28,9 @@ def plot_dla_diffusion(c_grid, cluster_grid, ax=None, title=None):
 
     ax.set_xlabel('x')
     ax.set_ylabel('y')
-    plt.show()
+
+    if ax is None:
+        plt.show()
 
 
 def plot_dla_diff_sim_params(df_sim_results):
@@ -42,18 +44,38 @@ def plot_dla_diff_sim_params(df_sim_results):
 
     fig, ax = plt.subplots(2, 1, figsize=(4, 7), sharex=True)
 
-    sns.scatterplot(data=df_sim_results, x='$\eta$', y='$\omega$', ax=ax[0])
+    sns.scatterplot(data=df_sim_results, x='$\eta$', y='$\omega$', size=0.25, ax=ax[0], legend=False)
 
     sns.lineplot(data=df_sim_results, x='$\eta$', y='$\omega$', ax=ax[0])
     ax[0].set_title('Optimal Omega for SOR Method')
     ax[0].grid()
 
-    sns.scatterplot(data=df_sim_results, x='$\eta$', y='$D_r$', ax=ax[1])
+    # sns.scatterplot(data=df_sim_results, x='$\eta$', y='$D_r$', ax=ax[1])
 
     sns.lineplot(data=df_sim_results, x='$\eta$', y='$D_r$', ax=ax[1])
     ax[1].set_title('Fractal Dimension of DLA Cluster')
     ax[1].grid()
 
     plt.tight_layout()
+
+    plt.show()
+
+
+def plot_dla_diff_eta_snapshots(c_grids, cluster_grids, etas):
+    """
+    Plots a series of DLA clusters with a diffusion gradient
+    for different eta values.
+    arguments:
+        c_grids (ndarray): The concentration grids.
+        cluster_grids (ndarray): The DLA cluster grids.
+        etas (ndarray): The eta values.
+    """
+
+    n = c_grids.shape[0]
+
+    fig, ax = plt.subplots(n, 1, figsize=(4, 4 * n), sharex=True, sharey=True)
+
+    for i in range(n):
+        plot_dla_diffusion(c_grids[i], cluster_grids[i], ax=ax[i], title=f'$\eta$ = {etas[i]}')
 
     plt.show()
