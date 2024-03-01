@@ -2,22 +2,26 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-def plot_dla_diffusion(c_grid, cluster_grid, ax=None, title=None):
+def plot_dla(cluster_grid, c_grid=None, ax=None, title=None):
     """
     Plots a DLA cluster with a diffusion gradient.
     arguments:
-        c_grid (ndarray): The concentration grid.
         cluster_grid (ndarray): The DLA cluster grid.
+        c_grid (ndarray): The concentration grid. Default is None.
         ax (matplotlib.axes.Axes): The axes to plot on. If None, a new figure is created.
         title (str): The title of the plot.
     """
+
+    if c_grid is not None:
+        assert c_grid.shape == cluster_grid.shape, 'c_grid and cluster_grid must have the same shape.'
+        grid_combined = np.where(np.isnan(cluster_grid), c_grid, np.nan)
+    else:
+        grid_combined = cluster_grid
 
     if ax is None:
         fig, ax = plt.subplots()
     else:
         fig = ax.get_figure()
-
-    grid_combined = np.where(np.isnan(cluster_grid), c_grid, np.nan)
 
     ax.imshow(grid_combined, cmap='plasma', origin='lower')
 
@@ -76,6 +80,6 @@ def plot_dla_diff_eta_snapshots(c_grids, cluster_grids, etas):
     fig, ax = plt.subplots(n, 1, figsize=(4, 4 * n), sharex=True, sharey=True)
 
     for i in range(n):
-        plot_dla_diffusion(c_grids[i], cluster_grids[i], ax=ax[i], title=f'$\eta$ = {etas[i]}')
+        plot_dla(cluster_grids[i], c_grids[i], ax=ax[i], title=f'$\eta$ = {etas[i]}')
 
     plt.show()

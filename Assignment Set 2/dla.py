@@ -202,33 +202,12 @@ def generate_walkers(n_walkers, cluster_grid):
     assert cluster_grid.shape[0] == cluster_grid.shape[1], 'grid must be square'
 
     # Vacant sites on top row
-    grid_indices = np.array([index for index in np.ndindex(cluster_grid.shape)])[-cluster_grid.shape[0]:, :]
-    empty_indices = np.argwhere(np.isnan(cluster_grid[-1, :]))
+    # grid_indices = np.array([index for index in np.ndindex(cluster_grid.shape)])[-cluster_grid.shape[0]:]
+    empty_pos = np.argwhere(np.isnan(cluster_grid))
+    empty_pos_top_row = empty_pos[empty_pos[:, 0] == cluster_grid.shape[0] - 1]
 
     # Starting positions
-    pos = grid_indices[np.random.choice(empty_indices.shape[0], n_walkers, replace=True)]
-
-    return pos
-
-
-def generate_walkers_cupy(n_walkers, cp_cluster_grid):
-    """
-    A version of the generate_walkers function using CuPy.
-    arguments:
-        n_walkers (int): The number of walkers to generate.
-        cluster_grid (ndarray): The lattice with the DLA cluster values (NaN for unoccupied sites).
-    returns:
-        pos (ndarray): The starting positions of the walkers.
-    """
-
-    assert cp_cluster_grid.shape[0] == cp_cluster_grid.shape[1], 'grid must be square'
-
-    # Vacant sites on top row
-    grid_indices = cp.array([index for index in np.ndindex(cp_cluster_grid.shape)])[-cp_cluster_grid.shape[0]:, :]
-    empty_indices = cp.argwhere(cp.isnan(cp_cluster_grid[-1, :]))
-
-    # Starting positions
-    pos = grid_indices[cp.random.choice(empty_indices.shape[0], n_walkers, replace=True)]
+    pos = empty_pos_top_row[np.random.choice(empty_pos_top_row.shape[0], n_walkers, replace=True)]
 
     return pos
 
@@ -292,7 +271,7 @@ def run_walkers(n_walkers, cluster_grid, offsets):
     return
 
 
-def run_walkers_alt(n_walkers, cluster_grid, offsets):
+def run_walkers_alt(n_walkers, cluster_grid, offsets, p_s=1.0):
     """
     Perform a random walk from the top of the lattice
     until the DLA cluster is reached.
@@ -300,6 +279,7 @@ def run_walkers_alt(n_walkers, cluster_grid, offsets):
         n_walkers (int): The number of walkers to run.
         cluster_grid (ndarray): The lattice with the DLA cluster values (NaN for unoccupied sites).
         offsets (list): The neighbourhood stencil.
+        p_s (float): The probability of sticking to the cluster.
     returns:
         cluster_grid (ndarray): The updated lattice with the DLA cluster values.
     """
@@ -307,7 +287,7 @@ def run_walkers_alt(n_walkers, cluster_grid, offsets):
     assert cluster_grid.shape[0] == cluster_grid.shape[1], 'grid must be square'
     assert n_walkers > 0, 'n_walkers must be greater than 0'
 
-    max_steps = np.prod(cluster_grid.shape) * 10
+    max_steps = np.prod(cluster_grid.shape)
     grid_size = cluster_grid.shape[0]
 
     # Starting positions
@@ -326,32 +306,34 @@ def run_walkers_alt(n_walkers, cluster_grid, offsets):
 
     # Get neighbour indices
     trails = pos[:, np.newaxis] + moves_cumsum
+
+    # Boundary conditions
+    trails[:, :, 1] = np.mod(trails[:, :, 1], grid_size)
+    
+    # Flatten indices
     trails_flat_indices = trails[:, :, 0] * grid_size + trails[:, :, 1]
+    trails_flat_indices = np.where(np.logical_or(trails[:, :, 1] < 0, trails[:, :, 1] >= grid_size), -1, trails_flat_indices)
     
     # Check for out-of-bounds
-    trails_oob_mask = np.logical_or(trails[:, :, 1] < 0, trails[:, :, 1] >= grid_size).reshape(n_walkers, max_steps, 1)
+    trails_oob_mask = np.logical_or(trails[:, :, 0] < 0, trails[:, :, 0] >= grid_size).reshape(n_walkers, max_steps, 1)
     trails_oob_first_index = np.argmax(trails_oob_mask, axis=1)
     trails_oob_first_index = np.where(np.any(trails_oob_mask, axis=1), trails_oob_first_index, np.full((n_walkers, 1), max_steps))
     trails_oob_first_index = trails_oob_first_index.flatten()
-    
-    # SUSPISH!!! CHECK IF PERIODIC CONDITIONS ARE MET
 
     # Check for intersection with growth candidates
     intersect = np.in1d(trails_flat_indices.flatten(), growth_candidate_indices_flat).reshape(trails_flat_indices.shape)
+    intersect_in_bounds = np.logical_and(intersect, np.arange(max_steps) < trails_oob_first_index[:, np.newaxis])
     intersect_first_indices = np.argmax(intersect, axis=1)
-    intersect_growth_candidates = trails_flat_indices[np.arange(n_walkers), intersect_first_indices]
+    intersect_growth_candidates = trails[np.arange(n_walkers), intersect_first_indices]
     
     intersect_first_indices = intersect_first_indices[np.any(intersect, axis=1)]
     intersect_growth_candidates = intersect_growth_candidates[np.any(intersect, axis=1)]
     trails_oob_first_index = trails_oob_first_index[np.any(intersect, axis=1)]
-    # intersection_first_index = intersection_first_indices[intersection_first_indices < trails_oob_first_index]
-    intersection_growth_candidate = intersect_growth_candidates[intersect_first_indices < trails_oob_first_index]
+    intersect_growth_candidate = intersect_growth_candidates[intersect_first_indices < trails_oob_first_index]
     
-    if intersection_growth_candidate.size > 0:
-        gc_select = intersection_growth_candidate[0]
-        first_occ_x = gc_select // grid_size
-        first_occ_y = gc_select % grid_size
-        cluster_grid[tuple([first_occ_x, first_occ_y])] = 0
+    if intersect_growth_candidate.size > 0:
+        gc_select = intersect_growth_candidate[0]
+        cluster_grid[tuple(gc_select)] = 0
         return cluster_grid
     else:
         return
@@ -464,9 +446,6 @@ def run_dla_monte_carlo(size, max_iter, p_s=1.0):
     # Construct neighbourhood stencil
     offsets = [[i, j] for i in range(-1, 2) for j in range(-1, 2) if abs(i) != abs(j)]
 
-    # cp_cluster_grid = cp.array(cluster_grid)
-    # cp_offsets = cp.array(offsets)
-
     # Growth loop
     iter_ct = 0
     safety_ct = 0
@@ -474,20 +453,16 @@ def run_dla_monte_carlo(size, max_iter, p_s=1.0):
 
         # Random walk
         grid_update = run_walkers_alt(size, cluster_grid, offsets)
-        # grid_update = run_walkers_cupy(size*size, cp_cluster_grid, cp_offsets)
         if grid_update is not None:
             cluster_grid = grid_update
             iter_ct += 1
-        else:
-            print("No attachment.")
+        # else:
+        #     print("No attachment.")
 
         safety_ct += 1
 
     if safety_ct == 1e6:
         print("Loop terminated with incomplete results.")
-
-    # Turn cupy array back to numpy array
-    # cluster_grid = cp.asnumpy(cp_cluster_grid)
 
     return cluster_grid
 
@@ -589,7 +564,7 @@ def run_dla_params(size, max_iter, eta_range, n_sims, GPU_delta_interval=50):
             omega = min_result.x
 
             # Rerun with optimal omega
-            c_grid, cluster_grid, _ = run_dla_diff_equation(size, max_iter, omega, eta, GPU_delta_interval=50)
+            c_grid, cluster_grid, _ = run_dla_diff_equation(size * size, max_iter, omega, eta, GPU_delta_interval=50)
             c_grids[i, n] = np.array(c_grid)
             cluster_grids[i, n] = np.array(cluster_grid)
 
