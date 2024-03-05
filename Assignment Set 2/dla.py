@@ -212,7 +212,7 @@ def generate_walkers(n_walkers, cluster_grid):
     return pos
 
 
-def run_walkers(n_walkers, cluster_grid, offsets):
+def run_walkers(n_walkers, cluster_grid, offsets, p_s=1.0):
     """
     Perform a random walk from the top of the lattice
     until the DLA cluster is reached.
@@ -220,6 +220,7 @@ def run_walkers(n_walkers, cluster_grid, offsets):
         n_walkers (int): The number of walkers to run.
         cluster_grid (ndarray): The lattice with the DLA cluster values (NaN for unoccupied sites).
         offsets (ndarray): The neighbourhood stencil.
+        p_s (float): The probability of sticking to the cluster.
     returns:
         cluster_grid (ndarray): The updated lattice with the DLA cluster values.
     """
@@ -250,9 +251,15 @@ def run_walkers(n_walkers, cluster_grid, offsets):
 
         # If any cluster cells detected, add first position to grid and return
         if np.any(occ_mask):
-            first_occ = np.argwhere(occ_mask)[0]
-            cluster_grid[tuple(pos[first_occ].T)] = 0
-            return cluster_grid
+
+            # Stick to cluster with probability p_s
+            if p_s < 1.0:
+                occ_mask = np.logical_and(occ_mask, np.random.uniform(size=occ_mask.shape) < p_s)
+            
+            if np.any(occ_mask):
+                first_occ = np.argwhere(occ_mask)[0]
+                cluster_grid[tuple(pos[first_occ].T)] = 0
+                return cluster_grid
 
         # Wrap around x
         nbrs[:, :, 1] = np.mod(nbrs[:, :, 1], grid_size)
@@ -271,7 +278,7 @@ def run_walkers(n_walkers, cluster_grid, offsets):
     return
 
 
-def run_walkers_alt(n_walkers, cluster_grid, offsets, p_s=1.0):
+def run_walkers_alt(n_walkers, cluster_grid, offsets, p_s=1.0, residual_walkers=np.array([])):
     """
     Perform a random walk from the top of the lattice
     until the DLA cluster is reached.
@@ -280,6 +287,7 @@ def run_walkers_alt(n_walkers, cluster_grid, offsets, p_s=1.0):
         cluster_grid (ndarray): The lattice with the DLA cluster values (NaN for unoccupied sites).
         offsets (list): The neighbourhood stencil.
         p_s (float): The probability of sticking to the cluster.
+        residual_walkers (ndarray): Previous walker trails that did not attach to the cluster or go out of bounds (to recycle).
     returns:
         cluster_grid (ndarray): The updated lattice with the DLA cluster values.
     """
@@ -291,7 +299,12 @@ def run_walkers_alt(n_walkers, cluster_grid, offsets, p_s=1.0):
     grid_size = cluster_grid.shape[0]
 
     # Starting positions
-    pos = generate_walkers(n_walkers, cluster_grid)
+    n_walkers_deficit = n_walkers - residual_walkers.shape[0]
+    pos = generate_walkers(n_walkers_deficit, cluster_grid)
+
+    # Add residual walkers from previous iteration
+    if residual_walkers.shape[0] > 0:
+        pos = np.append(pos, residual_walkers, axis=0)
 
     # Growth candidates
     grid_indices = np.array([index for index in np.ndindex(cluster_grid.shape)])
@@ -299,6 +312,7 @@ def run_walkers_alt(n_walkers, cluster_grid, offsets, p_s=1.0):
     growth_candidate_indices = growth_candidates(occupied_indices, offsets, grid_size)
     growth_candidate_indices_flat = growth_candidate_indices[:, 0] * grid_size + growth_candidate_indices[:, 1]
 
+    # Generate random moves
     offsets = np.array(offsets)
     moves = offsets[np.random.choice(offsets.shape[0], n_walkers * max_steps)]
     moves = moves.reshape(n_walkers, max_steps, 2)
@@ -312,31 +326,63 @@ def run_walkers_alt(n_walkers, cluster_grid, offsets, p_s=1.0):
     
     # Flatten indices
     trails_flat_indices = trails[:, :, 0] * grid_size + trails[:, :, 1]
-    trails_flat_indices = np.where(np.logical_or(trails[:, :, 1] < 0, trails[:, :, 1] >= grid_size), -1, trails_flat_indices)
+    trails_flat_indices = np.where(np.logical_or(trails[:, :, 0] < 0, trails[:, :, 0] >= grid_size), -1, trails_flat_indices)
     
     # Check for out-of-bounds
     trails_oob_mask = np.logical_or(trails[:, :, 0] < 0, trails[:, :, 0] >= grid_size).reshape(n_walkers, max_steps, 1)
-    trails_oob_first_index = np.argmax(trails_oob_mask, axis=1)
-    trails_oob_first_index = np.where(np.any(trails_oob_mask, axis=1), trails_oob_first_index, np.full((n_walkers, 1), max_steps))
-    trails_oob_first_index = trails_oob_first_index.flatten()
+    trails_oob_1st_idx = np.argmax(trails_oob_mask, axis=1)
+    trails_oob_any = np.any(trails_oob_mask, axis=1)
+    trails_oob_1st_idx = np.where(trails_oob_any, trails_oob_1st_idx, max_steps)
+    trails_oob_1st_idx = trails_oob_1st_idx.flatten()
 
-    # Check for intersection with growth candidates
+    # Check for intersections with cluster
+    trails_in_cluster_mask = np.logical_not(np.isnan(cluster_grid.flatten()[trails_flat_indices]).reshape(n_walkers, max_steps, 1))
+    trails_in_cluster_1st_idx = np.argmax(trails_in_cluster_mask, axis=1)
+    trails_in_cluster_any = np.any(trails_in_cluster_mask, axis=1)
+    trails_in_cluster_1st_idx = np.where(trails_in_cluster_any, trails_in_cluster_1st_idx, max_steps)
+    trails_in_cluster_1st_idx = trails_in_cluster_1st_idx.flatten()
+
+    # Check for successful intersection with growth candidates
     intersect = np.in1d(trails_flat_indices.flatten(), growth_candidate_indices_flat).reshape(trails_flat_indices.shape)
-    intersect_in_bounds = np.logical_and(intersect, np.arange(max_steps) < trails_oob_first_index[:, np.newaxis])
-    intersect_first_indices = np.argmax(intersect, axis=1)
-    intersect_growth_candidates = trails[np.arange(n_walkers), intersect_first_indices]
+    intersect_rnd_test = np.random.uniform(size=intersect.shape) < p_s
+
+    # Compound condition
+    intersect_in_bounds = np.logical_and(intersect_rnd_test, np.arange(max_steps) < trails_oob_1st_idx[:, np.newaxis])
+    intersect_outside_cluster = np.logical_and(intersect_in_bounds, np.arange(max_steps) < trails_in_cluster_1st_idx[:, np.newaxis])
+    intersect_success = np.logical_and(intersect_outside_cluster, intersect)
+
+    # Find first succesful intersection
+    intersect_1st_idx = np.argmax(intersect_success, axis=1)
+    intersect_success_any = np.any(intersect_success, axis=1)
+    intersect_1st_idx = np.where(intersect_success_any, intersect_1st_idx, max_steps - 1)
+    intersect_1st_idx = intersect_1st_idx.flatten()
+
+    # Check if intersection is before out-of-bounds, before intersection with the cluster and passes random test
+    intersect_success_total = np.logical_and(intersect_1st_idx < trails_oob_1st_idx - 1,
+                                             intersect_1st_idx < trails_in_cluster_1st_idx - 1)
+
+    # Find first succesful intersection
+    intersect_growth_candidates = trails[np.arange(n_walkers), intersect_1st_idx]
+    intersect_growth_candidates = intersect_growth_candidates[intersect_success_total]
+
+    # Collect residual walkers (not out of bounds and not adding to cluster)
+    incomplete_mask = np.logical_and(np.logical_not(trails_oob_any).flatten(), np.logical_not(intersect_success_total))
+    incomplete_mask = incomplete_mask.flatten()
+    residual_trails = trails[incomplete_mask]
+    index_before_cluster_entry = trails_in_cluster_1st_idx[trails_in_cluster_1st_idx < trails_oob_1st_idx] - 1
     
-    intersect_first_indices = intersect_first_indices[np.any(intersect, axis=1)]
-    intersect_growth_candidates = intersect_growth_candidates[np.any(intersect, axis=1)]
-    trails_oob_first_index = trails_oob_first_index[np.any(intersect, axis=1)]
-    intersect_growth_candidate = intersect_growth_candidates[intersect_first_indices < trails_oob_first_index]
-    
-    if intersect_growth_candidate.size > 0:
-        gc_select = intersect_growth_candidate[0]
-        cluster_grid[tuple(gc_select)] = 0
-        return cluster_grid
+    if np.sum(incomplete_mask) == 0:
+        residual_walkers_new = np.array([])
     else:
-        return
+        residual_walkers_new = residual_trails[:, index_before_cluster_entry].reshape(-1, 2)
+        # print(f"{residual_trails.shape[0]} unfinished walks")
+    
+    if intersect_growth_candidates.size > 0:
+        gc_select = intersect_growth_candidates[0]
+        cluster_grid[tuple(gc_select)] = 0
+        return cluster_grid, residual_walkers_new
+    else:
+        return None, residual_walkers_new
 
 
 # ===== Main DLA functions =====
@@ -449,10 +495,12 @@ def run_dla_monte_carlo(size, max_iter, p_s=1.0):
     # Growth loop
     iter_ct = 0
     safety_ct = 0
+    residual_walkers = np.array([])
     while iter_ct < max_iter and safety_ct < 1e6:
 
         # Random walk
-        grid_update = run_walkers_alt(size, cluster_grid, offsets)
+        # grid_update, residual_walkers = run_walkers_alt(size, cluster_grid, offsets, p_s, residual_walkers)
+        grid_update = run_walkers(size, cluster_grid, offsets, p_s)
         if grid_update is not None:
             cluster_grid = grid_update
             iter_ct += 1
