@@ -83,3 +83,22 @@ def plot_dla_diff_eta_snapshots(c_grids, cluster_grids, etas):
         plot_dla(cluster_grids[i], c_grids[i], ax=ax[i], title=f'$\eta$ = {etas[i]}')
 
     plt.show()
+
+
+def plot_dla_mc_sim_params(df_sim_results):
+    """
+    Creates a plot showing the effect of the p_s parameter
+    on the fractal dimension of the Monte Carlo DLA cluster.
+    arguments:
+        df_sim_results (pandas.DataFrame): The simulation results.
+    """
+
+    fig, ax = plt.subplots(figsize=(4, 4))
+
+    sns.lineplot(data=df_sim_results, x='$\eta$', y='$D_r$', ax=ax[1])
+    ax[0].set_title('Fractal Dimension of DLA Cluster')
+    ax[0].grid()
+
+    plt.tight_layout()
+
+    plt.show()
