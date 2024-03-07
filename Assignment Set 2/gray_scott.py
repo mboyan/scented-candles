@@ -28,20 +28,21 @@ def gray_scott_step_GPU(u_old, u_new, v_old, v_new, f, k, dt, Du_dx2, Dv_dx2):
         v_new[i, j] += dt * (Dv_dx2 * lapl_v + u_old[i, j] * v_old[i, j]**2 - (f + k) * v_old[i, j])
 
 
-def run_gray_scott(u0, v0, max_iter, Du, Dv, f, k, dt, dx):
+def run_gray_scott(u0, v0, max_time, Du, Dv, f, k, dt, dx, use_GPU=False):
     """
     Simulates the Gray-Scott reaction-diffusion model
     on a doubly periodic lattice.
     arguments:
         u0 (ndarray): The initial concentration of U.
         v0 (ndarray): The initial concentration of V.
-        max_iter (int): The number of iterations to run.
+        max_time (int): The simulation time.
         Du (float): The diffusion rate of U.
         Dv (float): The diffusion rate of V.
         F (float): The feed rate.
         k (float): The kill rate.
         dt (float): The time step.
         dx (float): The spatial step.
+        use_GPU (bool): Whether to use GPU parallelisation.
     returns:
         u (ndarray): The concentration of U after max_iter iterations.
         v (ndarray): The concentration of V after max_iter iterations.
@@ -57,37 +58,46 @@ def run_gray_scott(u0, v0, max_iter, Du, Dv, f, k, dt, dx):
     v = v0.copy()
 
     # Initialize the GPU arrays
-    d_u_a = cuda.to_device(u)
-    d_u_b = cuda.to_device(u)
-    d_v_a = cuda.to_device(v)
-    d_v_b = cuda.to_device(v)
+    if use_GPU:
+        d_u_a = cuda.to_device(u)
+        d_u_b = cuda.to_device(u)
+        d_v_a = cuda.to_device(v)
+        d_v_b = cuda.to_device(v)
 
     # Pre-compute constants
-    Du_dx2 = Du * dt / dx**2
-    Dv_dx2 = Dv * dt / dx**2
+    Du_dx2 = Du / dx**2
+    Dv_dx2 = Dv / dx**2
 
-    for _ in range(max_iter):
-        # gray_scott_step_GPU[invoke_smart_kernel((size, size))](d_u_a, d_u_b, d_v_a, d_v_b, f, k, dt, Du_dx2, Dv_dx2)
-        # gray_scott_step_GPU[invoke_smart_kernel((size, size))](d_u_b, d_u_a, d_v_b, d_v_a, f, k, dt, Du_dx2, Dv_dx2)
+    time_ct = 0
+    while time_ct < max_time:
+        if use_GPU:
+            gray_scott_step_GPU[invoke_smart_kernel((size, size))](d_u_a, d_u_b, d_v_a, d_v_b, f, k, dt, Du_dx2, Dv_dx2)
+            gray_scott_step_GPU[invoke_smart_kernel((size, size))](d_u_b, d_u_a, d_v_b, d_v_a, f, k, dt, Du_dx2, Dv_dx2)
+        else:
+            u_bottom = np.roll(u, 1, axis=0)
+            u_top = np.roll(u, -1, axis=0)
+            u_left = np.roll(u, 1, axis=1)
+            u_right = np.roll(u, -1, axis=1)
 
-        u_bottom = np.roll(u, 1, axis=0)
-        u_top = np.roll(u, -1, axis=0)
-        u_left = np.roll(u, 1, axis=1)
-        u_right = np.roll(u, -1, axis=1)
+            v_bottom = np.roll(v, 1, axis=0)
+            v_top = np.roll(v, -1, axis=0)
+            v_left = np.roll(v, 1, axis=1)
+            v_right = np.roll(v, -1, axis=1)
 
-        v_bottom = np.roll(v, 1, axis=0)
-        v_top = np.roll(v, -1, axis=0)
-        v_left = np.roll(v, 1, axis=1)
-        v_right = np.roll(v, -1, axis=1)
+            lapl_u = u_bottom + u_top + u_left + u_right - 4 * u
+            lapl_v = v_bottom + v_top + v_left + v_right - 4 * v
 
-        lapl_u = u_bottom + u_top + u_left + u_right - 4 * u
-        lapl_v = v_bottom + v_top + v_left + v_right - 4 * v
+            u_new = u + dt * (Du_dx2 * lapl_u - u * v**2 + f * (1 - u))
+            v_new = v + dt * (Dv_dx2 * lapl_v + u * v**2 - (f + k) * v)
 
-        u += dt * (Du_dx2 * lapl_u - u * v**2 + f * (1 - u))
-        v += dt * (Dv_dx2 * lapl_v + u * v**2 - (f + k) * v)
+            u = np.array(u_new)
+            v = np.array(v_new)
+
+        time_ct += dt
     
     # Copy the results back to the CPU
-    # u = d_u_a.copy_to_host()
-    # v = d_v_a.copy_to_host()
+    if use_GPU:
+        u = d_u_a.copy_to_host()
+        v = d_v_a.copy_to_host()
 
     return u, v

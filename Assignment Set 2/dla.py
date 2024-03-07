@@ -1,5 +1,4 @@
 import numpy as np
-import cupy as cp
 import pandas as pd
 from numba import jit, cuda
 from scipy.optimize import minimize_scalar

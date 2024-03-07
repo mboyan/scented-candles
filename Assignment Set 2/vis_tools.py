@@ -105,3 +105,65 @@ def plot_dla_mc_sim_params(df_sim_results):
     plt.tight_layout()
 
     plt.show()
+
+
+def plot_reaction_diffusion(c_grids, labels=None):
+    """
+    Plot multiple 2D reaction-diffusion simulation results.
+    arguments:
+        c_grids (ndarray): The grids of concentrations (either U or V).
+        labels (list): Optional labels for the plots. Default is None
+    """
+
+    assert np.ndim(c_grids) == 3, 'input must contain an array of 2D grids'
+
+    n_plots = c_grids.shape[0]
+
+    if labels is not None:
+        assert n_plots == len(labels), 'mismatching number of labels and plots'
+
+    fig, axs = plt.subplots(n_plots, 1, figsize=(4, 4*n_plots + 1), sharex=True)
+    if n_plots == 1:
+        axs = [axs]
+
+    for i, c in enumerate(c_grids):
+        img = axs[i].imshow(c, cmap='plasma', interpolation='nearest', origin='lower')
+        axs[i].set_xlabel('x')
+        axs[i].set_ylabel('y')
+        if labels is not None:
+            axs[i].set_title(labels[i])
+    
+    cbar_ax = fig.add_axes([0.15, 0.03, 0.7, 0.02])
+    fig.colorbar(img, cax=cbar_ax, orientation='horizontal')
+    cbar_ax.text(-0.2, 0.5, 'u(t,x,y)', transform=cbar_ax.transAxes, ha='left', va='center')
+    
+    plt.show()
+
+
+def plot_gray_scott_f_k(c_grid, f_range, k_range):
+    """
+    Plots the concentration patterns emerging from spatially
+    varying f and k parameters.
+    arguments:
+        c_grid (ndarray): The grid of concentrations (either U or V).
+        f_range (ndarray): A 1D array of f parameter values.
+        k_range (ndarray): A 1D array of k parameter values.
+    """
+
+    assert c_grid.shape[0] == c_grid.shape[1] == f_range.shape[0] == k_range.shape[0], 'c_grid must be square, potential array size mismatch'
+    assert np.ndim(c_grid) == 2, 'c_grid must be two-dimensional'
+
+    fig, ax = plt.subplots(figsize=(4, 5))
+
+    img = ax.imshow(c_grid, cmap='plasma', interpolation='nearest', origin='lower')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    print(np.arange(f_range.shape[0])[::100].shape)
+    ax.set_xticks(np.arange(f_range.shape[0])[::100], f_range[::100])
+    ax.set_yticks(np.arange(k_range.shape[0])[::100], k_range[::100])
+    
+    cbar_ax = fig.add_axes([0.15, 0.03, 0.7, 0.02])
+    fig.colorbar(img, cax=cbar_ax, orientation='horizontal')
+    cbar_ax.text(-0.2, 0.5, 'u(t,x,y)', transform=cbar_ax.transAxes, ha='left', va='center')
+    
+    plt.show()
