@@ -629,7 +629,7 @@ def run_dla_eta(size, max_iter, eta_range, n_sims, GPU_delta_interval=50):
             omega = min_result.x
 
             # Rerun with optimal omega
-            c_grid, cluster_grid, _ = run_dla_diff_equation(size * size, max_iter, omega, eta, GPU_delta_interval=50)
+            c_grid, cluster_grid, _ = run_dla_diff_equation(size, max_iter, omega, eta, GPU_delta_interval=50)
             c_grids[i, n] = np.array(c_grid)
             cluster_grids[i, n] = np.array(cluster_grid)
 

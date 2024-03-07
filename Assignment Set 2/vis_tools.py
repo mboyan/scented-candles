@@ -23,7 +23,7 @@ def plot_dla(cluster_grid, c_grid=None, ax=None, title=None):
     else:
         fig = ax.get_figure()
 
-    ax.imshow(grid_combined, cmap='plasma', origin='lower')
+    ax.imshow(grid_combined, cmap='plasma', origin='lower', interpolation='nearest')
 
     if title is not None:
         ax.set_title(title)
@@ -65,22 +65,25 @@ def plot_dla_diff_sim_params(df_sim_results):
     plt.show()
 
 
-def plot_dla_diff_eta_snapshots(c_grids, cluster_grids, etas):
+def plot_dla_param_snapshots(cluster_grids, params, c_grids=None, param_name='parameter'):
     """
     Plots a series of DLA clusters with a diffusion gradient
     for different eta values.
     arguments:
-        c_grids (ndarray): The concentration grids.
         cluster_grids (ndarray): The DLA cluster grids.
-        etas (ndarray): The eta values.
+        params (ndarray): The parameter values corresponding to the snapshots.
+        c_grids (ndarray): The concentration grids. Default is None.
     """
 
-    n = c_grids.shape[0]
+    n = cluster_grids.shape[0]
 
     fig, ax = plt.subplots(n, 1, figsize=(4, 4 * n), sharex=True, sharey=True)
 
     for i in range(n):
-        plot_dla(cluster_grids[i], c_grids[i], ax=ax[i], title=f'$\eta$ = {etas[i]}')
+        if c_grids is not None:
+            plot_dla(cluster_grids[i], c_grids[i], ax=ax[i], title=f'{param_name} = {params[i]}')
+        else:
+            plot_dla(cluster_grids[i], ax=ax[i], title=f'{param_name} = {params[i]}')
 
     plt.show()
 
@@ -95,9 +98,9 @@ def plot_dla_mc_sim_params(df_sim_results):
 
     fig, ax = plt.subplots(figsize=(4, 4))
 
-    sns.lineplot(data=df_sim_results, x='$\eta$', y='$D_r$', ax=ax[1])
-    ax[0].set_title('Fractal Dimension of DLA Cluster')
-    ax[0].grid()
+    sns.lineplot(data=df_sim_results, x='$p_s$', y='$D_r$', ax=ax)
+    ax.set_title('Fractal Dimension of DLA Cluster')
+    ax.grid()
 
     plt.tight_layout()
 
