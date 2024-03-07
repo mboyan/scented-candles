@@ -23,7 +23,7 @@ def plot_dla(cluster_grid, c_grid=None, ax=None, title=None):
     else:
         fig = ax.get_figure()
 
-    ax.imshow(grid_combined, cmap='plasma', origin='lower', interpolation='nearest')
+    img = ax.imshow(grid_combined, cmap='plasma', origin='lower', interpolation='nearest')
 
     if title is not None:
         ax.set_title(title)
@@ -35,6 +35,8 @@ def plot_dla(cluster_grid, c_grid=None, ax=None, title=None):
 
     if ax is None:
         plt.show()
+
+    return img
 
 
 def plot_dla_diff_sim_params(df_sim_results):
@@ -75,15 +77,20 @@ def plot_dla_param_snapshots(cluster_grids, params, c_grids=None, param_name='pa
         c_grids (ndarray): The concentration grids. Default is None.
     """
 
-    n = cluster_grids.shape[0]
+    n_plots= cluster_grids.shape[0]
 
-    fig, ax = plt.subplots(n, 1, figsize=(4, 4 * n), sharex=True, sharey=True)
+    fig, ax = plt.subplots(n_plots, 1, figsize=(4, 4 * n_plots + 1), sharex=True, sharey=True)
 
-    for i in range(n):
+    for i in range(n_plots):
         if c_grids is not None:
-            plot_dla(cluster_grids[i], c_grids[i], ax=ax[i], title=f'{param_name} = {params[i]}')
+            img = plot_dla(cluster_grids[i], c_grids[i], ax=ax[i], title=f'{param_name} = {params[i]}')
         else:
-            plot_dla(cluster_grids[i], ax=ax[i], title=f'{param_name} = {params[i]}')
+            img = plot_dla(cluster_grids[i], ax=ax[i], title=f'{param_name} = {params[i]}')
+
+    if c_grids is not None:
+        cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.02])
+        fig.colorbar(img, cax=cbar_ax, orientation='horizontal')
+        cbar_ax.text(-0.2, 0.5, 'u(t,x,y)', transform=cbar_ax.transAxes, ha='left', va='center')
 
     plt.show()
 
@@ -140,27 +147,40 @@ def plot_reaction_diffusion(c_grids, labels=None):
     plt.show()
 
 
-def plot_gray_scott_f_k(c_grid, f_range, k_range):
+def plot_gray_scott_f_k(c_grids, f_range, k_range, labels=None):
     """
     Plots the concentration patterns emerging from spatially
     varying f and k parameters.
     arguments:
-        c_grid (ndarray): The grid of concentrations (either U or V).
+        c_grids (ndarray): The grid of concentrations (either U or V).
         f_range (ndarray): A 1D array of f parameter values.
         k_range (ndarray): A 1D array of k parameter values.
     """
+    
+    assert np.ndim(c_grids) == 3, 'c_grids must be a collection of 2D grids'
+    assert c_grids.shape[1] == c_grids.shape[2] == f_range.shape[0] == k_range.shape[0], 'c_grid must be square, potential array size mismatch'
 
-    assert c_grid.shape[0] == c_grid.shape[1] == f_range.shape[0] == k_range.shape[0], 'c_grid must be square, potential array size mismatch'
-    assert np.ndim(c_grid) == 2, 'c_grid must be two-dimensional'
+    n_plots = c_grids.shape[0]
 
-    fig, ax = plt.subplots(figsize=(4, 5))
+    if labels is not None:
+        assert n_plots == len(labels), 'mismatching number of labels and plots'
 
-    img = ax.imshow(c_grid, cmap='plasma', interpolation='nearest', origin='lower')
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    print(np.arange(f_range.shape[0])[::100].shape)
-    ax.set_xticks(np.arange(f_range.shape[0])[::100], f_range[::100])
-    ax.set_yticks(np.arange(k_range.shape[0])[::100], k_range[::100])
+    fig, axs = plt.subplots(n_plots, 1, figsize=(4, 4*n_plots + 1))
+    if n_plots == 1:
+        axs = [axs]
+
+    for i, c in enumerate(c_grids):
+        img = axs[i].imshow(c, cmap='plasma', interpolation='nearest', origin='lower')
+        axs[i].set_xlabel('k')
+        axs[i].set_ylabel('f')
+        if labels is not None:
+            axs[i].set_title(labels[i])
+
+        # Use parameter ranges as ticks
+        f_ticks = ["%.2f" % f for f in f_range]
+        k_ticks = ["%.2f" % k for k in k_range]
+        axs[i].set_xticks(np.arange(f_range.shape[0])[::f_range.shape[0] // 8], f_ticks[::f_range.shape[0] // 8])
+        axs[i].set_yticks(np.arange(k_range.shape[0])[::k_range.shape[0] // 8], k_ticks[::k_range.shape[0] // 8])
     
     cbar_ax = fig.add_axes([0.15, 0.03, 0.7, 0.02])
     fig.colorbar(img, cax=cbar_ax, orientation='horizontal')
