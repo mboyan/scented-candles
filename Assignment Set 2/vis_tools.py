@@ -1,6 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
+import statsmodels.formula.api as smf
+import statsmodels.api as sm
 
 def plot_dla(cluster_grid, c_grid=None, ax=None, title=None):
     """
@@ -90,7 +93,7 @@ def plot_dla_param_snapshots(cluster_grids, params, c_grids=None, param_name='pa
     if c_grids is not None:
         cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.02])
         fig.colorbar(img, cax=cbar_ax, orientation='horizontal')
-        cbar_ax.text(-0.2, 0.5, 'u(t,x,y)', transform=cbar_ax.transAxes, ha='left', va='center')
+        cbar_ax.text(-0.2, 0.5, '$u(t,x,y)$', transform=cbar_ax.transAxes, ha='left', va='center')
 
     plt.show()
 
@@ -114,7 +117,7 @@ def plot_dla_mc_sim_params(df_sim_results):
     plt.show()
 
 
-def plot_reaction_diffusion(c_grids, labels=None):
+def plot_reaction_diffusion(c_grids, labels=None, cmap_label='$u(t,x,y)$'):
     """
     Plot multiple 2D reaction-diffusion simulation results.
     arguments:
@@ -128,13 +131,18 @@ def plot_reaction_diffusion(c_grids, labels=None):
 
     if labels is not None:
         assert n_plots == len(labels), 'mismatching number of labels and plots'
+    
+    # Find global min and max
+    vmin = np.min(c_grids)
+    vmax = np.max(c_grids)
 
-    fig, axs = plt.subplots(n_plots, 1, figsize=(4, 4*n_plots + 1), sharex=True)
+    fig, axs = plt.subplots(int(np.ceil(n_plots / 2)), 2, figsize=(4, 2 * np.ceil(n_plots / 2) + 1), sharex=True, sharey=True)
+    axs = axs.flatten()
     if n_plots == 1:
         axs = [axs]
 
     for i, c in enumerate(c_grids):
-        img = axs[i].imshow(c, cmap='plasma', interpolation='nearest', origin='lower')
+        img = axs[i].imshow(c, cmap='plasma', interpolation='nearest', origin='lower', vmin=vmin, vmax=vmax)
         axs[i].set_xlabel('x')
         axs[i].set_ylabel('y')
         if labels is not None:
@@ -142,12 +150,12 @@ def plot_reaction_diffusion(c_grids, labels=None):
     
     cbar_ax = fig.add_axes([0.15, 0.03, 0.7, 0.02])
     fig.colorbar(img, cax=cbar_ax, orientation='horizontal')
-    cbar_ax.text(-0.2, 0.5, 'u(t,x,y)', transform=cbar_ax.transAxes, ha='left', va='center')
+    cbar_ax.text(-0.02, 0.5, cmap_label, transform=cbar_ax.transAxes, ha='right', va='center')
     
     plt.show()
 
 
-def plot_gray_scott_f_k(c_grids, f_range, k_range, labels=None):
+def plot_gray_scott_f_k(c_grids, f_range, k_range, labels=None, param_mark=None):
     """
     Plots the concentration patterns emerging from spatially
     varying f and k parameters.
@@ -155,12 +163,19 @@ def plot_gray_scott_f_k(c_grids, f_range, k_range, labels=None):
         c_grids (ndarray): The grid of concentrations (either U or V).
         f_range (ndarray): A 1D array of f parameter values.
         k_range (ndarray): A 1D array of k parameter values.
+        param_mark (list): Coordinates of marked locations in each parameter grid. Default is None.
     """
     
     assert np.ndim(c_grids) == 3, 'c_grids must be a collection of 2D grids'
     assert c_grids.shape[1] == c_grids.shape[2] == f_range.shape[0] == k_range.shape[0], 'c_grid must be square, potential array size mismatch'
 
     n_plots = c_grids.shape[0]
+
+    # Get indices of closest parameter values
+    if param_mark is not None:
+        param_locs = []
+        for i, plot_locs in enumerate(param_mark):
+            param_locs.append([np.array([np.argmin(np.abs(f_range - loc[0])), np.argmin(np.abs(k_range - loc[1]))]) for loc in plot_locs])
 
     if labels is not None:
         assert n_plots == len(labels), 'mismatching number of labels and plots'
@@ -181,9 +196,37 @@ def plot_gray_scott_f_k(c_grids, f_range, k_range, labels=None):
         k_ticks = ["%.2f" % k for k in k_range]
         axs[i].set_xticks(np.arange(f_range.shape[0])[::f_range.shape[0] // 8], f_ticks[::f_range.shape[0] // 8])
         axs[i].set_yticks(np.arange(k_range.shape[0])[::k_range.shape[0] // 8], k_ticks[::k_range.shape[0] // 8])
-    
+
+        if param_locs is not None:
+            for j, loc in enumerate(param_locs[i]):
+                axs[i].scatter(loc[0], loc[1], c='w', s=50, marker='x')
+                axs[i].annotate('abcdefghijklmnopqrstuvwxyz'[j], (loc[0], loc[1]), textcoords="offset points", 
+                                xytext=(5,5), ha='center', color='w')
+
     cbar_ax = fig.add_axes([0.15, 0.03, 0.7, 0.02])
     fig.colorbar(img, cax=cbar_ax, orientation='horizontal')
-    cbar_ax.text(-0.2, 0.5, 'u(t,x,y)', transform=cbar_ax.transAxes, ha='left', va='center')
+    cbar_ax.text(-0.2, 0.5, '$u(t,x,y)$', transform=cbar_ax.transAxes, ha='left', va='center')
     
+    plt.show()
+
+
+def residuals_qqplot(data, factor_lvls):
+    """
+    Creates a QQ-plot of the residuals of a model.
+    arguments:
+        data (list): A list of arrays containing the response values.
+        factor_lvls (ndarray): The factor levels.
+    """
+
+    fig, ax = plt.subplots(figsize=(3, 3))
+    fig.suptitle('QQ-plot of Residuals')
+
+    responses = np.concatenate(data)
+    factors = np.repeat(factor_lvls, len(data[0]))
+    df_analysis = pd.DataFrame({'response': responses, 'factor': factors})
+
+    model = smf.ols('response ~ C(factor)', data=df_analysis).fit()
+
+    residuals = model.resid
+    sm.qqplot(residuals, line='s', ax=ax)
     plt.show()

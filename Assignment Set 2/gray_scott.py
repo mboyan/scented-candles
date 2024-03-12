@@ -54,7 +54,7 @@ def gray_scott_step_GPU_param_arrays(u_old, u_new, v_old, v_new, f, k, dt, Du_dx
         v_new[i, j] = v_old[i, j] + dt * (Dv_dx2 * lapl_v + u_old[i, j] * v_old[i, j]**2 - (f[i, j] + k[i, j]) * v_old[i, j])
 
 
-def run_gray_scott(u0, v0, max_time, Du, Dv, f, k, dt, dx, use_GPU=False):
+def run_gray_scott(u0, v0, max_time, Du, Dv, f, k, dt, dx, use_GPU=False, diff_interval=100):
     """
     Simulates the Gray-Scott reaction-diffusion model
     on a doubly periodic lattice.
@@ -69,6 +69,7 @@ def run_gray_scott(u0, v0, max_time, Du, Dv, f, k, dt, dx, use_GPU=False):
         dt (float): The time step.
         dx (float): The spatial step.
         use_GPU (bool): Whether to use GPU parallelisation.
+        diff_interval (int): The interval at which to check for convergence at the end of the simulation. Default is 10.
     returns:
         u (ndarray): The concentration of U after max_iter iterations.
         v (ndarray): The concentration of V after max_iter iterations.
@@ -103,18 +104,24 @@ def run_gray_scott(u0, v0, max_time, Du, Dv, f, k, dt, dx, use_GPU=False):
     Dv_dx2 = Dv / dx**2
 
     time_ct = 0
-    while time_ct < max_time:
+    while time_ct <= max_time:
         if use_GPU:
             if time_ct % 2 == 0:
                 if isarray_params:
                     gray_scott_step_GPU_param_arrays[invoke_smart_kernel((size, size))](d_u_a, d_u_b, d_v_a, d_v_b, d_f, d_k, dt, Du_dx2, Dv_dx2)
                 else:
                     gray_scott_step_GPU[invoke_smart_kernel((size, size))](d_u_a, d_u_b, d_v_a, d_v_b, f, k, dt, Du_dx2, Dv_dx2)
+                if time_ct == max_time - diff_interval:
+                    u_prelast = d_u_a.copy_to_host()
+                    v_prelast = d_v_a.copy_to_host()
             else:
                 if isarray_params:
                     gray_scott_step_GPU_param_arrays[invoke_smart_kernel((size, size))](d_u_b, d_u_a, d_v_b, d_v_a, d_f, d_k, dt, Du_dx2, Dv_dx2)
                 else:
                     gray_scott_step_GPU[invoke_smart_kernel((size, size))](d_u_b, d_u_a, d_v_b, d_v_a, f, k, dt, Du_dx2, Dv_dx2)
+                if time_ct == max_time - diff_interval:
+                    u_prelast = d_u_b.copy_to_host()
+                    v_prelast = d_v_b.copy_to_host()
         else:
             u_bottom = np.roll(u, 1, axis=0)
             u_top = np.roll(u, -1, axis=0)
@@ -135,11 +142,19 @@ def run_gray_scott(u0, v0, max_time, Du, Dv, f, k, dt, dx, use_GPU=False):
             u = np.array(u_new)
             v = np.array(v_new)
 
+            if time_ct == max_time - diff_interval:
+                u_prelast = np.array(u)
+                v_prelast = np.array(v)
+
         time_ct += dt
     
     # Copy the results back to the CPU
     if use_GPU:
         u = d_u_a.copy_to_host()
         v = d_v_a.copy_to_host()
+    
+    # Calculate the difference between the last and pre-last iterations
+    u_diff = np.abs(u - u_prelast)
+    v_diff = np.abs(v - v_prelast)
 
-    return u, v
+    return u, v, u_diff, v_diff
