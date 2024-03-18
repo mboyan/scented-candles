@@ -11,8 +11,6 @@ def plot_lattice_topology(size_x, size_y):
 
     xs = np.arange(size_x)
     ys = np.arange(size_y)
-    print(xs)
-    print(ys)
 
     fig, ax = plt.subplots()
     fig.set_size_inches(3, 3)
@@ -44,10 +42,14 @@ def plot_lattice_topology(size_x, size_y):
     plt.show()
 
 
-def plot_lattice_topo_from_coeff(coeff_matrix, lattice_coords):
+def plot_lattice_topo_from_coeff(coeff_matrix, lattice_coords, ax=None):
     """
     Plots the index map of a 2D lattice based on
     a coefficient matrix and the coordinates of the lattice points.
+    Arguments:
+        coeff_matrix (np.ndarray): the coefficient matrix.
+        lattice_coords (np.ndarray): the coordinates of the lattice points.
+        ax (matplotlib.axes.Axes, optional): the axes to plot on. If None, a new figure is created.
     """
 
     size_x = np.max(lattice_coords[:, 1]) + 1
@@ -55,8 +57,11 @@ def plot_lattice_topo_from_coeff(coeff_matrix, lattice_coords):
 
     lattice_coords = np.flip(lattice_coords, axis=1)
 
-    fig, ax = plt.subplots()
-    fig.set_size_inches(4, 4)
+    if ax is None:
+        fig, ax = plt.subplots()
+        fig.set_size_inches(4, 4)
+    else:
+        fig = ax.get_figure()
     ax.set_aspect('equal', 'box')
 
     # Plot lattice points
@@ -79,22 +84,28 @@ def plot_lattice_topo_from_coeff(coeff_matrix, lattice_coords):
     ax.set_yticks(np.arange(size_y))
     ax.grid(True)
     # ax.axis('off')
-    plt.show()
+    if ax is None:
+        plt.show()
 
 
-def plot_coeff_matrix(coeff_matrix):
+def plot_coeff_matrix(coeff_matrix, ax=None):
     """
     Plots the coefficient matrix.
     Arguments:
         coeff_matrix (np.ndarray): the coefficient matrix.
+        ax (matplotlib.axes.Axes, optional): the axes to plot on. If None, a new figure is created.
     """
 
     # Get non-zero value positions
     non_zero_pos = np.array(np.where(coeff_matrix != 0))
 
     # Plot matrix
-    fig, ax = plt.subplots()
-    fig.set_size_inches(4, 4)
+    if ax is None:
+        fig, ax = plt.subplots()
+        fig.set_size_inches(4, 4)
+    else:
+        fig = ax.get_figure()
+    ax.set_aspect('equal', 'box')
     ax.pcolor(np.abs(np.flip(coeff_matrix, axis=0)), cmap='coolwarm', edgecolors='k')
 
     # Tag non-zero values
@@ -102,10 +113,32 @@ def plot_coeff_matrix(coeff_matrix):
         ax.text(pos[1] + 0.5, coeff_matrix.shape[0] - pos[0] - 0.5, f'{int(coeff_matrix[pos[0], pos[1]])}', ha='center', va='center', fontsize=8)
 
     # Set ticks
-    ax.set_xticks(np.arange(coeff_matrix.shape[0]) + 0.5)
-    ax.set_yticks(np.arange(coeff_matrix.shape[1]) + 0.5)
-    ax.set_xticklabels(np.arange(coeff_matrix.shape[0]))
-    ax.set_yticklabels(np.arange(coeff_matrix.shape[1] - 1, -1, -1))
-    ax.set_xlabel('Column index')
-    ax.set_ylabel('Row index')
+    ax.set_xticks(np.arange(coeff_matrix.shape[0], step=2) + 0.5)
+    ax.set_yticks(np.arange(coeff_matrix.shape[1], step=2) + 0.5)
+    ax.set_xticklabels(np.arange(coeff_matrix.shape[0], step=2))
+    ax.set_yticklabels(np.arange(coeff_matrix.shape[1] - 1, -1, -2))
+    ax.set_xlabel('q')
+    ax.set_ylabel('i')
+    
+    if ax is None:
+        plt.show()
+
+
+def plot_lattice_2D(coeff_matrix, lattice_coords):
+    """
+    Creates a combined plot of the lattice topology and the coefficient matrix.
+    Arguments:
+        coeff_matrix (np.ndarray): the coefficient matrix.
+        lattice_coords (np.ndarray): the coordinates of the lattice points.
+    """
+
+    fig, ax = plt.subplots(2, 1)
+    fig.set_size_inches(4, 8)
+    plot_lattice_topo_from_coeff(coeff_matrix, lattice_coords, ax=ax[0])
+    plot_coeff_matrix(coeff_matrix, ax=ax[1])
+
+    ax[0].set_title('Lattice Topology')
+    ax[1].set_title('Coefficient Matrix')
+
+    plt.tight_layout()
     plt.show()
