@@ -11,6 +11,8 @@ def plot_lattice_topology(size_x, size_y):
 
     xs = np.arange(size_x)
     ys = np.arange(size_y)
+    print(xs)
+    print(ys)
 
     fig, ax = plt.subplots()
     fig.set_size_inches(3, 3)
@@ -39,6 +41,44 @@ def plot_lattice_topology(size_x, size_y):
             ax.text(x+0.25/size_x, y+0.25/size_y, f'$i={y*size_x+x}$', ha='left', va='bottom', fontsize=8)
     
     ax.axis('off')
+    plt.show()
+
+
+def plot_lattice_topo_from_coeff(coeff_matrix, lattice_coords):
+    """
+    Plots the index map of a 2D lattice based on
+    a coefficient matrix and the coordinates of the lattice points.
+    """
+
+    size_x = np.max(lattice_coords[:, 1]) + 1
+    size_y = np.max(lattice_coords[:, 0]) + 1
+
+    lattice_coords = np.flip(lattice_coords, axis=1)
+
+    fig, ax = plt.subplots()
+    fig.set_size_inches(4, 4)
+    ax.set_aspect('equal', 'box')
+
+    # Plot lattice points
+    row_sums = np.sum(coeff_matrix, axis=1)
+    # ax.scatter(lattice_coords[:, 0], lattice_coords[:, 1], color='w', edgecolors='k')
+    for i, (x, y) in enumerate(lattice_coords):
+        if row_sums[i] == -4:
+            col = 'r'
+        else:
+            col = 'w'
+            nbr_indices = np.where(coeff_matrix[i] == 1)[0]
+            for nbr in nbr_indices:
+                ax.plot([x, lattice_coords[nbr, 0]], [y, lattice_coords[nbr, 1]], color='black')
+        ax.scatter(x, y, color=col, marker='o', edgecolors='k')
+        ax.text(x+0.25/size_x, y+0.25/size_y, f'$i={i}$', ha='left', va='bottom', fontsize=8)
+    
+    ax.set_xlabel('j')
+    ax.set_ylabel('k')
+    ax.set_xticks(np.arange(size_x))
+    ax.set_yticks(np.arange(size_y))
+    ax.grid(True)
+    # ax.axis('off')
     plt.show()
 
 
