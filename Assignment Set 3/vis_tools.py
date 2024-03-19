@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
 
 def plot_lattice_topology(size_x, size_y):
     """
@@ -139,6 +141,184 @@ def plot_lattice_2D(coeff_matrix, lattice_coords):
 
     ax[0].set_title('Lattice Topology')
     ax[1].set_title('Coefficient Matrix')
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_eigmode(eigmode, eigfreq, lattice_coords, ax=None, vmin=None, vmax=None):
+    """
+    Plots an eigenvector as a 2D scalar field.
+    Arguments:
+        eigmode (np.ndarray): the eigenvector.
+        eigfreq (float): the eigenfrequency.
+        lattice_coords (np.ndarray): the coordinates of the lattice points.
+        ax (matplotlib.axes.Axes, optional): the axes to plot on. If None, a new figure is created.
+        vmin (float, optional): the minimum value of the color scale.
+        vmax (float, optional): the maximum value of the color scale.
+    Returns:
+        matplotlib.image.AxesImage: the image object.
+    """
+
+    assert eigmode.ndim == 1, 'Eigenvector must be 1D.'
+    assert lattice_coords.ndim == 2, 'Lattice coordinates must be 2D.'
+    assert lattice_coords.shape[1] == 2, 'Lattice coordinates must contain 2 elements.'
+    assert eigmode.shape[0] == lattice_coords.shape[0], 'Eigenvector and lattice coordinates must have the same length.'
+
+    if ax is None:
+        fig, ax = plt.subplots()
+        fig.set_size_inches(4, 4)
+    else:
+        fig = ax.get_figure()
+    ax.set_aspect('equal', 'box')
+
+    size_x = np.max(lattice_coords[:, 0]) + 2
+    size_y = np.max(lattice_coords[:, 1]) + 2
+
+    scalar_field = np.zeros((size_x, size_y))
+    for i, (x, y) in enumerate(lattice_coords):
+        scalar_field[x + 1, y + 1] = eigmode[i]
+    
+    scalar_field = scalar_field.T
+    
+    if vmin is None:
+        vmin = np.min(scalar_field)
+    if vmax is None:
+        vmax = np.max(scalar_field)
+    vmin, vmax = np.min([vmin, -vmax]), np.max([-vmin, vmax])
+    im = ax.imshow(scalar_field, cmap='bwr', interpolation='nearest', origin='lower', vmin=vmin, vmax=vmax)
+    
+    if ax is None:
+        ax.set_xticks(np.arange(size_x, step=max(1, size_x//5)))
+        ax.set_yticks(np.arange(size_y, step=max(1, size_y//5)))
+        ax.set_xlabel('j')
+        ax.set_ylabel('k')
+        ax.set_title(f'$K={eigfreq}$')
+        plt.colorbar(im)
+        plt.show()
+    
+    return im
+
+
+def plot_eigmodes_spectrum(eigmodes, eigfreqs, lattice_coords, column_titles=None):
+    """
+    Plots the spectrum of eigenvectors.
+    Arguments:
+        eigmodes (list): a list of eigenvectors.
+        eigfreqs (list): a list of eigenfrequencies.
+        lattice_coords (np.ndarray): the coordinates of the lattice points.
+        column_titles (list, optional): a list of titles for each column.
+    """
+
+    assert type(eigmodes) == list, 'Eigenvectors must be a list.'
+    assert type(eigfreqs) == list, 'Eigenfrequencies must be a list.'
+    assert len(eigmodes) == len(eigfreqs), 'Eigenvectors and eigenfrequencies must have the same length.'
+    assert type(lattice_coords) == list, 'Lattice coordinates must be a list.'
+
+    fig, axs = plt.subplots(eigmodes[0].shape[0], len(eigmodes), sharex=True)
+    fig.set_size_inches(4, 4 / len(eigmodes) * eigmodes[0].shape[0])
+    fig.subplots_adjust(hspace=0.5)
+
+    vmin = min([np.min(eigmode) for eigmode in eigmodes])
+    vmax = max([np.max(eigmode) for eigmode in eigmodes])
+
+    for i, (eigmode, eigfreq, coords) in enumerate(zip(eigmodes, eigfreqs, lattice_coords)):
+        for j in range(eigmode.shape[0]):
+            img = plot_eigmode(eigmode[j], eigfreq[j], coords, ax=axs[j, i], vmin=vmin, vmax=vmax)
+            axs[j, i].set_xticks([0, np.ceil(max(coords[:, 0]) / 2 + 1), max(coords[:, 0]) + 2])
+            axs[j, i].set_yticks([0, np.ceil(max(coords[:, 1]) / 2 + 1), max(coords[:, 1]) + 2])
+
+            if j == 0 and column_titles is not None:
+                title_add = column_titles[i] + '\n'
+            else:
+                title_add = ''
+            axs[j, i].set_title(title_add + f"$K={'{:.3f}'.format(eigfreq[j])}$", fontsize=10)
+            axs[j, i].margins(y=0.01)
+
+    cbar_ax = fig.add_axes([0.15, 0.03, 0.7, 0.02])
+    cbar_ax.set_title('$v(x,y)$', fontsize=10)
+    fig.colorbar(img, cax=cbar_ax, orientation='horizontal')
+    # cbar_ax.text(-0.01, 0.5, '$v(x,y)$', transform=cbar_ax.transAxes, ha='right', va='center')
+
+    # plt.tight_layout()
+    plt.show()
+
+
+def plot_eigvals_Ls(result_setups, eigvals):
+    """
+    Creates a series of plots of the eigenvalues
+    as a function of the lattice size,
+    for different boundary shapes.
+    Arguments:
+        result_setups (pd.DataFrame): the experimental setups containing the boundary shapes and Ls.
+        eigvals (np.ndarray): the eigenvalues.
+    """
+
+    assert type(result_setups) == pd.DataFrame, 'Result setups must be a DataFrame.'
+
+    Ls = result_setups['L'].unique()
+    boundaries = result_setups['Boundary'].unique()
+
+    assert eigvals.ndim == 2, 'Eigenvalues must be 2D.'
+
+    fig, axs = plt.subplots(boundaries.shape[0], 1)
+    fig.set_size_inches(3.5, 3.25 * boundaries.shape[0])
+
+    for i, boundary in enumerate(boundaries):
+
+        bndry_mask = result_setups['Boundary'] == boundary
+        eigval_selection = -eigvals[bndry_mask]
+
+        eigval_indices = np.arange(eigval_selection.shape[1])
+
+        Ls_grid, eigval_indices = np.meshgrid(Ls, eigval_indices)
+
+        df_plot = pd.DataFrame({
+            '$L$': Ls_grid.T.flatten(),
+            '$K$ index': eigval_indices.T.flatten(),
+            '$|K|$': eigval_selection.flatten()
+        })
+
+        sns.lineplot(data=df_plot, x='$L$', y='$|K|$', hue='$K$ index', ax=axs[i])
+        axs[i].set_xscale('log')
+        axs[i].set_yscale('log')
+        axs[i].set_title(f'Boundary: {boundary}')
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_eigvals_Ns(result_setups, eigvals):
+    """
+    Plots the interval between the largest and smallest
+    eigenvalues as a function of the subdivision density,
+    for different boundary shapes.
+    Arguments:
+        result_setups (pd.DataFrame): the experimental setups containing the boundary shapes and Ns.
+        eigvals (np.ndarray): the eigenvalues.
+    """
+
+    assert type(result_setups) == pd.DataFrame, 'Result setups must be a DataFrame.'
+
+    Ns = result_setups['N'].unique()
+    boundaries = result_setups['Boundary'].unique()
+
+    assert eigvals.ndim == 2, 'Eigenvalues must be 2D.'
+
+    fig, axs = plt.subplots(boundaries.shape[0], 1)
+    fig.set_size_inches(3.5, 3.25 * boundaries.shape[0])
+
+    for i, boundary in enumerate(boundaries):
+
+        bndry_mask = result_setups['Boundary'] == boundary
+        eigval_selection = -eigvals[bndry_mask]
+
+        axs[i].fill_between(Ns.astype(int), np.min(eigval_selection, axis=1), np.max(eigval_selection, axis=1), alpha=0.5)
+        axs[i].set_xscale('log')
+        axs[i].set_yscale('log')
+        axs[i].set_xlabel('$N$')
+        axs[i].set_ylabel('$|K|$ range')
+        axs[i].set_title(f'Boundary: {boundary}')
 
     plt.tight_layout()
     plt.show()

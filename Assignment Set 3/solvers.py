@@ -218,13 +218,14 @@ def construct_coeff_matrix_alt(size_x, size_y, boundary_type='rect', sparse=Fals
     return coeffs_matrix, system_coords
 
 
-def solve_eigval_problem(coeff_matrix, factor, la_function=la.eigh):
+def solve_eigval_problem(coeff_matrix, factor, la_function=la.eigh, both_ends=False):
     """
     Solve the eigenvalue problem Mv = Kv for the 2D wave equation.
     Arguments:
         coeff_matrix (np.ndarray): the coefficient matrix M.
         factor (float): the factor to multiply the coefficient matrix with.
         la_function (function): the function to use for solving the eigenvalue problem.
+        both_ends (bool): whether to solve for both ends of the spectrum. Only works for spla.eigsh.
     Returns:
         np.ndarray: the eigenvalues.
         np.ndarray: the eigenvectors.
@@ -232,13 +233,17 @@ def solve_eigval_problem(coeff_matrix, factor, la_function=la.eigh):
 
     assert la_function in [la.eigh, la.eig, spla.eigs, spla.eigsh], "Invalid LA function."
     assert type(coeff_matrix) in [np.ndarray, sp.dia_matrix], "Invalid coefficient matrix type."
-    assert type(factor) in [int, float], "Invalid factor type."
+    assert type(factor) in [int, float, np.float64], "Invalid factor type."
+    assert (type(coeff_matrix) == sp.dia_matrix and la_function in [spla.eigs, spla.eigsh]) or \
+            (type(coeff_matrix) == np.ndarray and la_function in [la.eigh, la.eig]), "Invalid LA function for sparse matrix."
     
     # Solve eigenvalue problem
-    eigvals, eigvecs = la_function(factor * coeff_matrix)
-    # if type(coeff_matrix) == sp.dia_matrix:
-    #     eigvals, eigvecs = la_function(coeff_matrix, k=coeff_matrix.shape[0] - 2)
-    # else:
-    #     eigvals, eigvecs = la_function(factor * coeff_matrix)
+    if type(coeff_matrix) == sp.dia_matrix:
+        if both_ends:
+            eigvals, eigvecs = la_function(factor * coeff_matrix, which='BE')
+        else:    
+            eigvals, eigvecs = la_function(factor * coeff_matrix, which='SM')
+    else:
+        eigvals, eigvecs = la_function(factor * coeff_matrix)
 
-    return eigvals, eigvecs
+    return eigvals, eigvecs.T
