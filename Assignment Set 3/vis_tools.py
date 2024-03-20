@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
+from matplotlib import animation
+from IPython.display import HTML
+
 def plot_lattice_topology(size_x, size_y):
     """
     Plots the index map of a 2D lattice.
@@ -313,12 +316,110 @@ def plot_eigvals_Ns(result_setups, eigvals):
         bndry_mask = result_setups['Boundary'] == boundary
         eigval_selection = -eigvals[bndry_mask]
 
-        axs[i].fill_between(Ns.astype(int), np.min(eigval_selection, axis=1), np.max(eigval_selection, axis=1), alpha=0.5)
+        axs[i].plot(Ns, np.min(eigval_selection, axis=1), label='$|K|_{min}$')
+        axs[i].plot(Ns, np.max(eigval_selection, axis=1), label='$|K|_{max}$')
+        # axs[i].fill_between(Ns.astype(int), np.min(eigval_selection, axis=1), np.max(eigval_selection, axis=1), alpha=0.5)
         axs[i].set_xscale('log')
         axs[i].set_yscale('log')
         axs[i].set_xlabel('$N$')
         axs[i].set_ylabel('$|K|$ range')
         axs[i].set_title(f'Boundary: {boundary}')
+        axs[i].legend()
 
     plt.tight_layout()
+    plt.show()
+
+
+def animate_membranes(frames, times, interval=10):
+    """
+    Creates a 3D animation of a series of vibrating membranes from the provided frames.
+    input:
+        frames (numpy.ndarray) - a 3D array containing the frames for the animation of each string
+        times (numpy.ndarray) - an array with the corresponding timesteps
+    output:
+        an HTML animation
+    """
+
+    assert frames.ndim == 3, 'frames must be a 3D array'
+    assert frames.shape[1] == times.shape[0], 'frames and timesteps must have matching shapes'
+
+    n_frames = frames.shape[1]
+
+    fig, axs = plt.subplots(1, frames.shape[0], sharex=True, sharey=True)
+    fig.set_size_inches(8, 7/frames.shape[0])
+    plots = [axs[i].plot(np.linspace(0, 1, frames.shape[2]), frames[i][0])[0] for i in range(frames.shape[0])]
+    # plot, = ax.plot(np.linspace(0, 1, frames.shape[1]), frames[0])
+    time_txt = [ax.text(0.05, 0.05, '', transform=ax.transAxes) for ax in axs]
+
+    def init_anim():
+        """
+        Initialize animation
+        """
+        for j, plot in enumerate(plots):
+            plot.set_ydata(frames[j][0])
+            time_txt[j].set_text('')
+            axs[j].set_xlabel('$x$')
+            axs[j].set_ylabel('$u(x,t)$')
+            axs[j].set_title(f'Init. condition {j+1}')
+            axs[j].grid()
+        return *plots, *time_txt
+
+    def update(i):
+        """
+        Update animation
+        """
+        for j, plot in enumerate(plots):
+            plot.set_ydata(frames[j][i])
+            time_txt[j].set_text(f'$t={times[i]:.3f}$')
+        return *plots, *time_txt
+
+    anim = animation.FuncAnimation(fig, update, init_func=init_anim, frames=n_frames, interval=interval, blit=True)
+
+    plt.tight_layout()
+    plt.show()
+
+    return HTML(anim.to_html5_video())
+
+
+def plot_diff_eq_solution(c_vals, coords, src_idx=None):
+    """
+    Plots the solution of the diffusion equation.
+    Arguments:
+        c_vals (np.ndarray): the solution values.
+        coords (np.ndarray): the corresponding coordinates of the lattice points.
+        src_coords (np.ndarray, optional): the coordinates of the source point. Default is None.
+    """
+
+    assert c_vals.ndim == 1, 'Solution values must be 1D.'
+    assert coords.ndim == 2, 'Lattice coordinates must be 2D.'
+    assert c_vals.shape[0] == coords.shape[0], 'Solution values and lattice coordinates must have the same length.'
+
+    size_x = np.max(coords[:, 0]) + 2
+    size_y = np.max(coords[:, 1]) + 2
+
+    scalar_field = np.zeros((size_x, size_y))
+    for i, (x, y) in enumerate(coords):
+        scalar_field[x + 1, y + 1] = c_vals[i]
+
+    if src_idx is not None:
+        scalar_field[src_idx[0], src_idx[1]] = 1
+
+    scalar_field = scalar_field.T
+
+    fig, ax = plt.subplots()
+    fig.set_size_inches(4, 4)
+    ax.set_aspect('equal', 'box')
+
+    im = ax.imshow(scalar_field, cmap='plasma', interpolation='nearest', origin='lower')
+
+    cont = ax.contour(scalar_field, levels=np.linspace(0, 1, 6)**2, cmap='YlOrRd', alpha=0.5)
+    ax.clabel(cont, inline=True, fontsize=8)
+
+    ax.set_xticks(np.arange(size_x, step=max(1, size_x//5)))
+    ax.set_yticks(np.arange(size_y, step=max(1, size_y//5)))
+    ax.set_xlabel('j')
+    ax.set_ylabel('k')
+    ax.set_title('Diffusion Solution')
+    plt.colorbar(im)
+
     plt.show()
