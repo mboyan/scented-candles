@@ -254,6 +254,81 @@ def solve_eigval_problem(coeff_matrix, factor, la_function=la.eigh, both_ends=Fa
     return eigvals, eigvecs.T
 
 
-# def compute_amp_time_dependent(init_cond, )
+def compute_wave_time_dependent(init_amp, init_vel, eigvec, eigval, ts):
+    """
+    Computes the time-dependent solution of a vibrating membrane
+    given initial amplitude and velocity, an eigenvector and and eigenvalue.
+    Arguments:
+        init_amp (np.ndarray): the initial amplitude.
+        init_vel (np.ndarray): the initial velocity.
+        eigvec (np.ndarray): the eigenvector.
+        eigval (float): the eigenvalue.
+        ts (np.ndarray): the time steps.
+    Returns:
+        np.ndarray: the time-dependent solution.
+    """
+
+    assert type(init_amp) == np.ndarray, "Invalid initial amplitude type."
+    assert type(init_vel) == np.ndarray, "Invalid initial velocity type."
+    assert type(eigvec) == np.ndarray, "Invalid eigenvector type."
+    assert type(eigval) in [float, int, np.float64], "Invalid eigenvalue type."
+    assert type(ts) == np.ndarray, "Invalid time steps type."
+    assert init_amp.shape == init_vel.shape == eigvec.shape, "Invalid shape of input arrays."
+
+    # Array for storing snapshots
+    u_evolution = np.empty((ts.shape[0], eigvec.shape[0]))
+
+    # Find A and B coefficients
+    v_nonzero_mask = eigvec != 0
+
+    A_coeff = init_amp[v_nonzero_mask] / eigvec[v_nonzero_mask]
+    A_coeff = set(np.round(A_coeff, 10))
+    assert len(A_coeff) == 1 or (len(A_coeff) == 2 and 0 in A_coeff), "Ambiguous A coefficient."
+    A_coeff = list(A_coeff)
+    A_coeff = A_coeff[np.argmax(np.abs(A_coeff))]
+
+    B_coeff = init_vel[v_nonzero_mask] / (eigvec[v_nonzero_mask] * np.sqrt(-eigval))
+    B_coeff = set(np.round(B_coeff, 10))
+    assert len(B_coeff) == 1 or (len(B_coeff) == 2 and 0 in B_coeff), "Ambiguous B coefficient."
+    B_coeff = list(B_coeff)
+    B_coeff = B_coeff[np.argmax(np.abs(B_coeff))]
+
+    # Time-dependent solution
+    for i, t in enumerate(ts):
+        u_evolution[i] = A_coeff * np.cos(np.sqrt(-eigval) * t) * eigvec + B_coeff * np.sin(np.sqrt(-eigval) * t) * eigvec
+    
+    return u_evolution
 
 
+def compute_wave_time_dependent_multiple(init_amps, init_vels, eigvecs, eigvals, ts):
+    """
+    Computes the time-dependent solution of multiple vibrating membranes
+    given initial amplitudes and velocities, eigenvectors and eigenvalues.
+    Arguments:
+        init_amps (np.ndarray): the initial amplitudes.
+        init_vels (np.ndarray): the initial velocities.
+        eigvecs (np.ndarray): the eigenvectors.
+        eigvals (np.ndarray): the eigenvalues.
+        ts (np.ndarray): the time steps.
+    Returns:
+        np.ndarray: the time-dependent solutions.
+    """
+
+    assert type(init_amps) == list, "Invalid initial amplitudes type."
+    assert type(init_vels) == list, "Invalid initial velocities type."
+    assert type(eigvecs) == list, "Invalid eigenvectors type."
+    assert type(eigvals) == list, "Invalid eigenvalues type."
+    assert type(ts) == np.ndarray, "Invalid time steps type."
+    assert len(init_amps) == len(init_vels) == len(eigvecs) == len(eigvals), "Invalid shape of input arrays."
+
+    # Array for storing snapshots
+    u_evolutions = []
+
+    # Loop over membrane types
+    for i in range(len(eigvecs)):
+        # Loop over eigenvalues
+        for j in range(eigvecs[i].shape[0]):
+            u_evolution = compute_wave_time_dependent(init_amps[i][j], init_vels[i][j], eigvecs[i][j], eigvals[i][j], ts)
+            u_evolutions.append(u_evolution)
+    
+    return u_evolutions

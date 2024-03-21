@@ -330,13 +330,28 @@ def plot_eigvals_Ns(result_setups, eigvals):
     plt.show()
 
 
+def plot_time_dependent_solutions(u_evolutions, plot_times, lattice_coords, bndry_labels):
+    """
+    Creates a series of 3D plots of specific time steps
+    of the time-dependent solutions for different membrane shapes.
+    Arguments:
+        u_evolutions (np.ndarray): the time-dependent solutions.
+        plot_times (list): the times to plot.
+        lattice_coords (np.ndarray): the coordinates of the lattice points.
+        bndry_labels (list): the boundary labels.
+    """
+
+    fig, axs = plt.subplots(len(plot_times), len(bndry_labels))
+
+
 def animate_membranes(frames, times, interval=10):
     """
     Creates a 3D animation of a series of vibrating membranes from the provided frames.
-    input:
+    Arguments:
         frames (numpy.ndarray) - a 3D array containing the frames for the animation of each string
         times (numpy.ndarray) - an array with the corresponding timesteps
-    output:
+        interval (int, optional) - the interval between frames in milliseconds. Default is 10.
+    Returns:
         an HTML animation
     """
 
