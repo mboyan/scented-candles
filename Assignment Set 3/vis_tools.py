@@ -335,13 +335,51 @@ def plot_time_dependent_solutions(u_evolutions, plot_times, lattice_coords, bndr
     Creates a series of 3D plots of specific time steps
     of the time-dependent solutions for different membrane shapes.
     Arguments:
-        u_evolutions (np.ndarray): the time-dependent solutions.
+        u_evolutions (list): the time-dependent solutions.
         plot_times (list): the times to plot.
-        lattice_coords (np.ndarray): the coordinates of the lattice points.
+        lattice_coords (list): the coordinates of the lattice points.
         bndry_labels (list): the boundary labels.
     """
 
-    fig, axs = plt.subplots(len(plot_times), len(bndry_labels))
+    assert len(u_evolutions) == len(lattice_coords), 'Time-dependent solutions and lattice coordinates must have the same length.'
+    assert len(bndry_labels) == len(u_evolutions) == len(lattice_coords), 'Boundary labels, time-dependent solutions, and lattice coordinates must have the same length.'
+
+    fig, axs = plt.subplots(u_evolutions[0].shape[0], len(bndry_labels), subplot_kw={'projection': '3d'})
+    fig.set_size_inches(4, 4 * u_evolutions[0].shape[0] / len(bndry_labels))
+
+    for i, bndry_label in enumerate(bndry_labels):
+
+        size_x = np.max(lattice_coords[i][:, 0]) + 2
+        size_y = np.max(lattice_coords[i][:, 1]) + 2
+
+        for j, u_evol_eig in enumerate(u_evolutions[i]):
+
+            if j == 0:
+                title_add = bndry_label + ": "
+            else:
+                title_add = ''
+
+            for t in plot_times:
+
+                t_match = np.argmin(plot_times - t)
+                
+                xs = np.linspace(0, 1, size_x)
+                ys = np.linspace(0, 1, size_y)
+                X, Y = np.meshgrid(xs, ys)
+
+                u_full = np.full((size_x, size_y), np.nan)
+                for l, (x, y) in enumerate(lattice_coords[i]):
+                    u_full[x + 1, y + 1] = u_evol_eig[t_match, l]
+                Z = np.ma.masked_where(np.isnan(u_full), u_full).T
+
+                axs[j, i].plot_surface(X, Y, Z, cmap='plasma', edgecolor='k', linewidth=0.01, alpha=0.25)
+                axs[j, i].set_title(title_add + f'$t={t}$')
+                axs[j, i].set_xlabel('j')
+                axs[j, i].set_ylabel('k')
+                axs[j, i].set_zlabel('$u(x,y)$')
+    
+    plt.tight_layout()
+    plt.show()
 
 
 def animate_membranes(frames, times, interval=10):

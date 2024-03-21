@@ -326,9 +326,10 @@ def compute_wave_time_dependent_multiple(init_amps, init_vels, eigvecs, eigvals,
 
     # Loop over membrane types
     for i in range(len(eigvecs)):
+        u_evolutions_bndry = np.empty((eigvecs[i].shape[0], ts.shape[0], eigvecs[i].shape[1]))
         # Loop over eigenvalues
         for j in range(eigvecs[i].shape[0]):
-            u_evolution = compute_wave_time_dependent(init_amps[i][j], init_vels[i][j], eigvecs[i][j], eigvals[i][j], ts)
-            u_evolutions.append(u_evolution)
+            u_evolutions_bndry[j] = compute_wave_time_dependent(init_amps[i][j], init_vels[i][j], eigvecs[i][j], eigvals[i][j], ts)
+        u_evolutions.append(u_evolutions_bndry)
     
     return u_evolutions
