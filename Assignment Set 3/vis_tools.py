@@ -1,5 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import matplotlib.cm as cm
+import matplotlib.ticker as ticker
 import pandas as pd
 import seaborn as sns
 
@@ -330,7 +333,43 @@ def plot_eigvals_Ns(result_setups, eigvals):
     plt.show()
 
 
-def plot_time_dependent_solutions(u_evolutions, plot_times, lattice_coords, bndry_labels):
+def plot_init_condition(init_coords, init_vals):
+    """
+    Plots the initial condition of a vibrating membrane.
+    Arguments:
+        init_coords (np.ndarray): the coordinates of the lattice points.
+        init_vals (np.ndarray): the initial values.
+    """
+
+    assert init_coords.ndim == 2, 'Initial coordinates must be 2D.'
+    assert init_vals.ndim == 1, 'Initial values must be 1D.'
+    assert init_coords.shape[0] == init_vals.shape[0], 'Initial coordinates and values must have the same length.'
+
+    size_x = np.max(init_coords[:, 0]) + 2
+    size_y = np.max(init_coords[:, 1]) + 2
+
+    scalar_field = np.zeros((size_x, size_y))
+    for i, (x, y) in enumerate(init_coords):
+        scalar_field[x + 1, y + 1] = init_vals[i]
+
+    scalar_field = scalar_field.T
+
+    fig, ax = plt.subplots()
+    fig.set_size_inches(4, 4)
+    ax.set_aspect('equal', 'box')
+
+    im = ax.imshow(scalar_field, cmap='plasma', interpolation='nearest', origin='lower')
+    ax.set_xticks(np.arange(size_x, step=max(1, size_x//5)))
+    ax.set_yticks(np.arange(size_y, step=max(1, size_y//5)))
+    ax.set_xlabel('j')
+    ax.set_ylabel('k')
+    ax.set_title('Initial Condition')
+    plt.colorbar(im)
+
+    plt.show()
+
+
+def plot_time_dependent_solutions(u_evolutions, plot_times, lattice_coords, bndry_labels, eigval_labels, time_tags):
     """
     Creates a series of 3D plots of specific time steps
     of the time-dependent solutions for different membrane shapes.
@@ -339,31 +378,42 @@ def plot_time_dependent_solutions(u_evolutions, plot_times, lattice_coords, bndr
         plot_times (list): the times to plot.
         lattice_coords (list): the coordinates of the lattice points.
         bndry_labels (list): the boundary labels.
+        eigval_labels (list): the eigenvalue labels.
+        time_tags (list): the timestamps for each time step.
     """
 
     assert len(u_evolutions) == len(lattice_coords), 'Time-dependent solutions and lattice coordinates must have the same length.'
-    assert len(bndry_labels) == len(u_evolutions) == len(lattice_coords), 'Boundary labels, time-dependent solutions, and lattice coordinates must have the same length.'
+    assert len(bndry_labels) == len(u_evolutions) == len(lattice_coords) == len(eigval_labels), 'Boundary labels, time-dependent solutions, and lattice coordinates must have the same length.'
+    assert time_tags.ndim == 1, 'Time tags must be 1D.'
+    assert time_tags.shape[0] == u_evolutions[0].shape[1], 'Time tags and time-dependent solutions must have the same length.'
 
     fig, axs = plt.subplots(u_evolutions[0].shape[0], len(bndry_labels), subplot_kw={'projection': '3d'})
-    fig.set_size_inches(4, 4 * u_evolutions[0].shape[0] / len(bndry_labels))
+    fig.set_size_inches(4.5, 4.5 * u_evolutions[0].shape[0] / len(bndry_labels)+0.25)
+    fig.subplots_adjust(hspace=0.5)
 
     for i, bndry_label in enumerate(bndry_labels):
 
         size_x = np.max(lattice_coords[i][:, 0]) + 2
         size_y = np.max(lattice_coords[i][:, 1]) + 2
 
+        min_amp = np.min(u_evolutions[i])
+        max_amp = np.max(u_evolutions[i])
+
         for j, u_evol_eig in enumerate(u_evolutions[i]):
 
             if j == 0:
-                title_add = bndry_label + ": "
+                title_add = bndry_label + "\n"
             else:
                 title_add = ''
 
             for t in plot_times:
 
-                t_match = np.argmin(plot_times - t)
+                t_match = np.argmin(np.abs(time_tags - t))
                 
-                xs = np.linspace(0, 1, size_x)
+                if bndry_label == 'rectangle':
+                    xs = np.linspace(0, 0.5, size_x)
+                else:
+                    xs = np.linspace(0, 1, size_x)
                 ys = np.linspace(0, 1, size_y)
                 X, Y = np.meshgrid(xs, ys)
 
@@ -371,14 +421,35 @@ def plot_time_dependent_solutions(u_evolutions, plot_times, lattice_coords, bndr
                 for l, (x, y) in enumerate(lattice_coords[i]):
                     u_full[x + 1, y + 1] = u_evol_eig[t_match, l]
                 Z = np.ma.masked_where(np.isnan(u_full), u_full).T
+                
+                col = plt.cm.summer(t / np.max(plot_times))
+                face_cols = np.full((Z.shape[0], Z.shape[1], 4), col)
 
-                axs[j, i].plot_surface(X, Y, Z, cmap='plasma', edgecolor='k', linewidth=0.01, alpha=0.25)
-                axs[j, i].set_title(title_add + f'$t={t}$')
-                axs[j, i].set_xlabel('j')
-                axs[j, i].set_ylabel('k')
-                axs[j, i].set_zlabel('$u(x,y)$')
+                axs[j, i].plot_surface(X, Y, Z, facecolors=face_cols, edgecolor=col, linewidth=0.05, alpha=0.2, shade=True)
+                axs[j, i].set_xticks([0, 0.5, 1])
+                axs[j, i].set_yticks([0, 0.5, 1])
+                axs[j, i].set_xlim(0, 1)
+                axs[j, i].set_ylim(0, 1)
+                # axs[j, i].set_zlim(np.min(u_evol_eig), np.max(u_evol_eig))
+                axs[j, i].set_zlim(min_amp, max_amp)
+
+                axs[j, i].zaxis.set_major_formatter(ticker.FormatStrFormatter('%.0e'))
+                axs[j, i].tick_params(axis='x', which='major', pad=-3, labelsize=7)
+                axs[j, i].tick_params(axis='y', which='major', pad=-3, labelsize=7)
+                axs[j, i].tick_params(axis='z', which='major', pad=-0.5, labelsize=7)
+                axs[j, i].set_title(title_add + f'$K='+'{:.3f}'.format(eigval_labels[i][j])+'$', fontsize=9)
+                # axs[j, i].set_xlabel('j')
+                # axs[j, i].set_ylabel('k')
+                # axs[j, i].set_zlabel('$u(x,y)$')
     
-    plt.tight_layout()
+    sm = cm.ScalarMappable(cmap=plt.cm.summer, norm=mcolors.Normalize(vmin=plot_times[0], vmax=plot_times[-1]))
+    sm.set_array([])
+    cbar_ax = fig.add_axes([0.15, 0.03, 0.7, 0.02])
+    # cbar_ax.set_title('$v(x,y)$', fontsize=10)
+    fig.colorbar(sm, cax=cbar_ax, orientation='horizontal')
+    cbar_ax.text(-0.01, 0.5, '$t$', transform=cbar_ax.transAxes, ha='right', va='center')
+
+    # plt.tight_layout()
     plt.show()
 
 

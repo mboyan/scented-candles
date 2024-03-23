@@ -254,6 +254,29 @@ def solve_eigval_problem(coeff_matrix, factor, la_function=la.eigh, both_ends=Fa
     return eigvals, eigvecs.T
 
 
+def construct_init_condition_gaussian(h, x0, sigma, lattice_coords):
+    """
+    Constructs a 2D Gaussian initial condition.
+    Arguments:
+        h (float): the height of the Gaussian.
+        x0 (np.ndarray): the center of the Gaussian.
+        sigma (float): the standard deviation of the Gaussian.
+        lattice_coords (np.ndarray): the lattice coordinates of the membrane.
+    """
+
+    assert type(h) in [int, float, np.float64], "Invalid height type."
+    assert type(x0) == np.ndarray, "Invalid center type."
+    assert type(sigma) in [int, float, np.float64], "Invalid standard deviation type."
+    assert type(lattice_coords) == np.ndarray, "Invalid lattice coordinates type."
+    assert x0.shape[0] == 2, "Invalid center shape."
+    assert lattice_coords.shape[1] == 2, "Invalid lattice coordinates shape."
+
+    # Compute Gaussian
+    init_amp = h * np.exp(-np.linalg.norm(lattice_coords - x0 + 1, axis=1) ** 2 / (2 * sigma ** 2))
+
+    return init_amp
+
+
 def compute_wave_time_dependent(init_amp, init_vel, eigvec, eigval, ts):
     """
     Computes the time-dependent solution of a vibrating membrane
@@ -279,19 +302,8 @@ def compute_wave_time_dependent(init_amp, init_vel, eigvec, eigval, ts):
     u_evolution = np.empty((ts.shape[0], eigvec.shape[0]))
 
     # Find A and B coefficients
-    v_nonzero_mask = eigvec != 0
-
-    A_coeff = init_amp[v_nonzero_mask] / eigvec[v_nonzero_mask]
-    A_coeff = set(np.round(A_coeff, 10))
-    assert len(A_coeff) == 1 or (len(A_coeff) == 2 and 0 in A_coeff), "Ambiguous A coefficient."
-    A_coeff = list(A_coeff)
-    A_coeff = A_coeff[np.argmax(np.abs(A_coeff))]
-
-    B_coeff = init_vel[v_nonzero_mask] / (eigvec[v_nonzero_mask] * np.sqrt(-eigval))
-    B_coeff = set(np.round(B_coeff, 10))
-    assert len(B_coeff) == 1 or (len(B_coeff) == 2 and 0 in B_coeff), "Ambiguous B coefficient."
-    B_coeff = list(B_coeff)
-    B_coeff = B_coeff[np.argmax(np.abs(B_coeff))]
+    A_coeff = np.dot(init_amp, eigvec)
+    B_coeff = np.dot(init_vel, eigvec) / np.sqrt(-eigval)
 
     # Time-dependent solution
     for i, t in enumerate(ts):
@@ -324,12 +336,12 @@ def compute_wave_time_dependent_multiple(init_amps, init_vels, eigvecs, eigvals,
     # Array for storing snapshots
     u_evolutions = []
 
-    # Loop over membrane types
+    # Loop over boundary types
     for i in range(len(eigvecs)):
         u_evolutions_bndry = np.empty((eigvecs[i].shape[0], ts.shape[0], eigvecs[i].shape[1]))
         # Loop over eigenvalues
         for j in range(eigvecs[i].shape[0]):
-            u_evolutions_bndry[j] = compute_wave_time_dependent(init_amps[i][j], init_vels[i][j], eigvecs[i][j], eigvals[i][j], ts)
+            u_evolutions_bndry[j] = compute_wave_time_dependent(init_amps[i], init_vels[i], eigvecs[i][j], eigvals[i][j], ts)
         u_evolutions.append(u_evolutions_bndry)
     
     return u_evolutions
