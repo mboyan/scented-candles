@@ -364,7 +364,65 @@ def plot_init_condition(init_coords, init_vals):
     ax.set_xlabel('j')
     ax.set_ylabel('k')
     ax.set_title('Initial Condition')
+    
     plt.colorbar(im)
+    plt.show()
+
+
+def plot_init_condition_3D_multiple(init_coords, init_vals, bndry_labels):
+    """
+    Creates a series of 3D plots of the initial conditions
+    of different membrane shapes.
+    Arguments:
+        init_coords (list): the coordinates of the lattice points.
+        init_vals (list): the initial values.
+        bndry_label (str): the boundary labels.
+    """
+
+    assert type(init_coords) == list, 'Initial coordinates must be a list.'
+    assert type(init_vals) == list, 'Initial values must be a list.'
+    assert type(bndry_labels) == list, 'Boundary labels must be a list.'
+
+    fig, axs = plt.subplots(len(init_vals), init_vals[0].shape[0], subplot_kw={'projection': '3d'})
+    fig.set_size_inches(4.5, 6 * len(init_vals) / init_vals[0].shape[0])
+
+    for i, (coords, bndry_label) in enumerate(zip(init_coords, bndry_labels)):
+        
+        size_x = np.max(coords[:, 0]) + 2
+        size_y = np.max(coords[:, 1]) + 2
+
+        if bndry_label == 'rectangle':
+            xs = np.linspace(0, 0.5, size_x)
+        else:
+            xs = np.linspace(0, 1, size_x)
+        ys = np.linspace(0, 1, size_y)
+
+        for j in range(init_vals[i].shape[0]):
+
+            X, Y = np.meshgrid(xs, ys)
+            scalar_field = np.full((size_x, size_y), np.nan)
+            for k, (x, y) in enumerate(coords):
+                scalar_field[x + 1, y + 1] = init_vals[i][j][k]
+            Z = np.ma.masked_where(np.isnan(scalar_field), scalar_field).T
+
+            # col = plt.cm.summer(j / vals.shape[0])
+            # face_cols = np.full((Z.shape[0], Z.shape[1], 4), col)
+
+            axs[j, i].plot_surface(X, Y, Z, cmap='plasma', edgecolor='k', linewidth=0.05)
+            axs[j, i].set_xticks([0, 0.5, 1])
+            axs[j, i].set_yticks([0, 0.5, 1])
+            axs[j, i].set_xlim(0, 1)
+            axs[j, i].set_ylim(0, 1)
+            axs[j, i].set_zlim(-1, 1)
+
+            # axs[j, i].zaxis.set_major_formatter(ticker.FormatStrFormatter('%.0e'))
+            axs[j, i].tick_params(axis='x', which='major', pad=-3, labelsize=7)
+            axs[j, i].tick_params(axis='y', which='major', pad=-3, labelsize=7)
+            axs[j, i].tick_params(axis='z', which='major', pad=-0.5, labelsize=7)
+            axs[j, i].set_title(f'{bndry_label}:\nInit. condition {j+1}', fontsize=9)
+            # axs[i, j].set_xlabel('j')
+            # axs[i, j].set_ylabel('k')
+            # axs[i, j].set_zlabel('$u(x,y)$')
 
     plt.show()
 
