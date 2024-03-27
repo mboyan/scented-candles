@@ -440,7 +440,6 @@ def plot_time_dependent_solutions(u_evolutions, plot_times, lattice_coords, bndr
         time_tags (list): the timestamps for each time step.
     """
 
-    assert len(u_evolutions) == len(lattice_coords), 'Time-dependent solutions and lattice coordinates must have the same length.'
     assert len(bndry_labels) == len(u_evolutions) == len(lattice_coords) == len(eigval_labels), 'Boundary labels, time-dependent solutions, and lattice coordinates must have the same length.'
     assert time_tags.ndim == 1, 'Time tags must be 1D.'
     assert time_tags.shape[0] == u_evolutions[0].shape[1], 'Time tags and time-dependent solutions must have the same length.'
@@ -511,53 +510,161 @@ def plot_time_dependent_solutions(u_evolutions, plot_times, lattice_coords, bndr
     plt.show()
 
 
-def animate_membranes(frames, times, interval=10):
+def animate_membranes(u_evolutions, lattice_coords, bndry_labels, eigval_labels, time_tags, title, interval=10):
     """
     Creates a 3D animation of a series of vibrating membranes from the provided frames.
     Arguments:
-        frames (numpy.ndarray) - a 3D array containing the frames for the animation of each string
-        times (numpy.ndarray) - an array with the corresponding timesteps
+        u_evolutions (list): the time-dependent solutions.
+        lattice_coords (list): the coordinates of the lattice points.
+        bndry_labels (list): the boundary labels.
+        eigval_labels (list): the eigenvalue labels.
+        time_tags (numpy.ndarray): the timestamps for each time step.
+        title (str): the title of the animation.
         interval (int, optional) - the interval between frames in milliseconds. Default is 10.
     Returns:
         an HTML animation
     """
 
-    assert frames.ndim == 3, 'frames must be a 3D array'
-    assert frames.shape[1] == times.shape[0], 'frames and timesteps must have matching shapes'
+    assert len(bndry_labels) == len(u_evolutions) == len(lattice_coords) == len(eigval_labels), 'Boundary labels, time-dependent solutions, and lattice coordinates must have the same length.'
+    assert time_tags.ndim == 1, 'Time tags must be 1D.'
+    assert time_tags.shape[0] == u_evolutions[0].shape[1], 'Time tags and time-dependent solutions must have the same length.'
+    assert len(set([u_evol.shape[:2] for u_evol in u_evolutions])) == 1, 'All time-dependent solutions must have the same length.'
+    
+    n_frames = time_tags.shape[0]
 
-    n_frames = frames.shape[1]
+    fig, axs = plt.subplots(len(bndry_labels), u_evolutions[0].shape[0] + 1, subplot_kw={'projection': '3d'})
+    
+    fig.set_size_inches(6 * u_evolutions[0].shape[0] / len(bndry_labels) + 1, 7)
 
-    fig, axs = plt.subplots(1, frames.shape[0], sharex=True, sharey=True)
-    fig.set_size_inches(8, 7/frames.shape[0])
-    plots = [axs[i].plot(np.linspace(0, 1, frames.shape[2]), frames[i][0])[0] for i in range(frames.shape[0])]
-    # plot, = ax.plot(np.linspace(0, 1, frames.shape[1]), frames[0])
-    time_txt = [ax.text(0.05, 0.05, '', transform=ax.transAxes) for ax in axs]
+    Xs = []
+    Ys = []
+    plots = []
+    sizes_x = np.empty(len(bndry_labels), dtype=int)
+    sizes_y = np.empty(len(bndry_labels), dtype=int)
+    min_amps = np.empty(len(bndry_labels))
+    max_amps = np.empty(len(bndry_labels))
+
+    # Prepare data for plots
+    for i, bndry_label in enumerate(bndry_labels):
+
+        sizes_x[i] = np.max(lattice_coords[i][:, 0]) + 2
+        sizes_y[i] = np.max(lattice_coords[i][:, 1]) + 2
+
+        min_amps[i] = np.min(u_evolutions[i])
+        max_amps[i] = np.max(u_evolutions[i])
+
+        for j in range(u_evolutions[i].shape[0] + 1):
+                
+            if bndry_label == 'rectangle':
+                xs = np.linspace(0, 0.5, sizes_x[i])
+            else:
+                xs = np.linspace(0, 1, sizes_x[i])
+            ys = np.linspace(0, 1, sizes_y[i])
+            X, Y = np.meshgrid(xs, ys)
+            
+            # Sum eigenvectors for last plot
+            if j < u_evolutions[i].shape[0]:
+                u_evol_eig = u_evolutions[i][j]
+            else:
+                u_evol_eig = np.sum(u_evolutions[i], axis=0)
+
+            u_full = np.full((sizes_x[i], sizes_y[i]), np.nan)
+            for l, (x, y) in enumerate(lattice_coords[i]):
+                u_full[x + 1, y + 1] = u_evol_eig[0, l]
+            Z = np.ma.masked_where(np.isnan(u_full), u_full).T
+            
+            plots.append(axs[i, j].plot_surface(X, Y, Z, cmap='plasma', linewidth=0.05, shade=True))
+            Xs.append(X)
+            Ys.append(Y)
+    
+    def reset_ax(ax, X, Y, Z, min_amp, max_amp, bndry_label, eigval_label):
+        """
+        Reset axis with new data
+        """
+
+        ax.clear()
+
+        plot = ax.plot_surface(X, Y, Z, cmap='plasma', linewidth=0.05, shade=True, vmin=min_amp, vmax=max_amp)
+
+        ax.set_xticks([0, 0.5, 1])
+        ax.set_yticks([0, 0.5, 1])
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        # ax.set_zlim(np.min(u_evol_eig), np.max(u_evol_eig))
+        ax.set_zlim(min_amp*1.5, max_amp*1.5)
+
+        ax.zaxis.set_major_formatter(ticker.FormatStrFormatter('%.0e'))
+        ax.tick_params(axis='x', which='major', pad=-3, labelsize=7)
+        ax.tick_params(axis='y', which='major', pad=-3, labelsize=7)
+        ax.tick_params(axis='z', which='major', pad=-0.5, labelsize=7)
+        
+        if eigval_label is not None:
+            ax.set_title(bndry_label + f'\n$K='+'{:.3f}'.format(eigval_label)+'$', fontsize=9)
+        else:
+            ax.set_title(bndry_label + '\nSum', fontsize=9)
+        
+        return plot
 
     def init_anim():
         """
         Initialize animation
         """
-        for j, plot in enumerate(plots):
-            plot.set_ydata(frames[j][0])
-            time_txt[j].set_text('')
-            axs[j].set_xlabel('$x$')
-            axs[j].set_ylabel('$u(x,t)$')
-            axs[j].set_title(f'Init. condition {j+1}')
-            axs[j].grid()
-        return *plots, *time_txt
+        for i, bndry_label in enumerate(bndry_labels):
+            for j in range(u_evolutions[i].shape[0] + 1):
 
-    def update(i):
+                idx = i * (u_evolutions[i].shape[0] + 1) + j
+
+                # Sum eigenvectors for last plot
+                if j < u_evolutions[i].shape[0]:
+                    u_evol_eig = u_evolutions[i][j]
+                else:
+                    u_evol_eig = np.sum(u_evolutions[i], axis=0)
+
+                u_full = np.full((sizes_x[i], sizes_y[i]), np.nan)
+                for l, (x, y) in enumerate(lattice_coords[i]):
+                    u_full[x + 1, y + 1] = u_evol_eig[0, l]
+                Z = np.ma.masked_where(np.isnan(u_full), u_full).T
+                
+                if j < u_evolutions[i].shape[0]:
+                    plots[idx] = reset_ax(axs[i, j], Xs[idx], Ys[idx], Z, min_amps[i], max_amps[i], bndry_label, eigval_labels[i][j])
+                else: 
+                    plots[idx] = reset_ax(axs[i, j], Xs[idx], Ys[idx], Z, min_amps[i], max_amps[i], bndry_label, None)
+        
+        return plots
+
+    def update(t):
         """
         Update animation
         """
-        for j, plot in enumerate(plots):
-            plot.set_ydata(frames[j][i])
-            time_txt[j].set_text(f'$t={times[i]:.3f}$')
-        return *plots, *time_txt
+        for i in range(len(bndry_labels)):
+            for j in range(u_evolutions[i].shape[0] + 1):
+                
+                idx = i * (u_evolutions[i].shape[0] + 1) + j
+
+                # Sum eigenvectors for last plot
+                if j < u_evolutions[i].shape[0]:
+                    u_evol_eig = u_evolutions[i][j]
+                else:
+                    u_evol_eig = np.sum(u_evolutions[i], axis=0)
+
+                u_full = np.full((sizes_x[i], sizes_y[i]), np.nan)
+                for l, (x, y) in enumerate(lattice_coords[i]):
+                    u_full[x + 1, y + 1] = u_evol_eig[t, l]
+                Z = np.ma.masked_where(np.isnan(u_full), u_full).T
+
+                if j < u_evolutions[i].shape[0]:
+                    plots[idx] = reset_ax(axs[i, j], Xs[idx], Ys[idx], Z, min_amps[i], max_amps[i], bndry_label, eigval_labels[i][j])
+                else:
+                    plots[idx] = reset_ax(axs[i, j], Xs[idx], Ys[idx], Z, min_amps[i], max_amps[i], bndry_label, None)
+        
+        # Update the figure title
+        fig.suptitle(title + ': t={:.2f}'.format(time_tags[t]))
+
+        return plots
 
     anim = animation.FuncAnimation(fig, update, init_func=init_anim, frames=n_frames, interval=interval, blit=True)
 
-    plt.tight_layout()
+    # plt.tight_layout()
     plt.show()
 
     return HTML(anim.to_html5_video())
@@ -603,5 +710,241 @@ def plot_diff_eq_solution(c_vals, coords, src_idx=None):
     ax.set_ylabel('k')
     ax.set_title('Diffusion Solution')
     plt.colorbar(im)
+
+    plt.show()
+
+
+def plot_harmonic_oscillator(xs, vs, ts, ks):
+    """
+    Plots the time series and the phase space of multiple
+    harmonic oscillators with different k parameters.
+    Arguments:
+        xs (numpy.ndarray): the time series of the positions (one series per k value).
+        vs (numpy.ndarray): the time series of the velocities (one series per k value).
+        ts (numpy.ndarray): the time points.
+        ks (numpy.ndarray): the k parameters.
+    """
+
+    assert xs.ndim == vs.ndim == 2, 'Time series must be 2D.'
+    assert xs.shape[0] == vs.shape[0] == ks.shape[0], 'Time series and k parameters must have the same length.'
+
+    fig, axs = plt.subplots(2, 2)
+    fig.set_size_inches(4, 4.2)
+
+    for i, k in enumerate(ks):
+        axs[0, 0].plot(vs[i], xs[i], label=f'$k={k}$', linewidth=1)
+        axs[0, 1].plot(ts[i], xs[i], label=f'$k={k}$', linewidth=1)
+        axs[1, 0].plot(vs[i], ts[i], label=f'$k={k}$', linewidth=1)
+    
+    # axs[0, 0].set_xlabel('$v(t)$')
+    axs[0, 0].set_ylabel('$x(t)$')
+    axs[0, 0].tick_params(axis='x', labelbottom=False, bottom=False)
+    axs[1, 0].set_xlabel('$v(t)$')
+    axs[1, 0].set_ylabel('$t$')
+    axs[0, 1].set_xlabel('$t$')
+    axs[0, 1].set_ylabel('$x(t)$')
+    axs[0, 1].tick_params(axis='y', labelleft=False, labelright=True, left=False, right=True)
+    axs[0, 1].yaxis.set_label_position('right')
+
+    max_amp = max(np.max(np.abs(xs)), np.max(np.abs(vs))) + 0.5
+    axs[0, 0].set_xlim((-max_amp, max_amp))
+    axs[0, 0].set_ylim((-max_amp, max_amp))
+    axs[0, 1].set_xlim((np.min(ts), np.max(ts)))
+    axs[0, 1].set_ylim((-max_amp, max_amp))
+    axs[1, 0].set_xlim((-max_amp, max_amp))
+    axs[1, 0].set_ylim((np.max(ts), np.min(ts)))
+    
+
+    axs[0, 0].set_title('Phase Plot')
+    # axs[1, 0].set_title('$v(t)$ vs. $t$')
+    # axs[0, 1].set_title('$x(t)$ vs. $t$')
+    axs[0, 0].grid(True)
+    axs[0, 1].grid(True)
+    axs[1, 0].grid(True)
+    axs[1, 1].set_axis_off()
+
+    handles, labels = axs[0, 0].get_legend_handles_labels()
+
+    axs[1, 1].legend(handles, labels, loc='center')
+
+    # plt.tight_layout(pad=0.5)
+    plt.show()
+
+
+def phase_plots(xs, vs, omegas):
+    """
+    Plots the phase space of multiple harmonic oscillators.
+    Arguments:
+        xs (numpy.ndarray): the positions.
+        vs (numpy.ndarray): the velocities.
+        omegas (numpy.ndarray): the angular frequencies.
+    """
+
+    assert xs.ndim == vs.ndim == 2, 'Positions and velocities must be 2D.'
+    assert xs.shape[0] == vs.shape[0] == omegas.shape[0], 'Positions, velocities, and angular frequencies must have the same length.'
+
+    n_rows = np.floor(omegas.shape[0] / 2).astype(int)
+
+    fig, axs = plt.subplots(n_rows, 2)
+    fig.set_size_inches(4, 2 * n_rows)
+    fig.subplots_adjust(wspace=0.15)
+
+    for i, ax in enumerate(axs.flatten()):
+        ax.plot(vs[i], xs[i], linewidth=0.8, label='{:.3f}'.format(omegas[i]))
+
+        ax.set_xlabel('$v(t)$')
+        ax.set_ylabel('$x(t)$')
+        ax.yaxis.set_label_coords(-0.15, 0.5)
+        ax.set_title(f'$\omega={omegas[i]}$')
+
+    plt.tight_layout(pad=0.5)
+    plt.show()
+
+
+def plot_solution_errors(solutions, ts, labels, last=None, ax=None, legend=False):
+    """
+    Plots the errors between multiple numerical solutions
+    of the harmonic oscillator with k=1, x0=1, v0=0
+    and its analytical solution.
+    Arguments:
+        solutions (numpy.ndarray): the numerical solutions.
+        ts (numpy.ndarray): the time points.
+        labels (list): the labels of the solutions.
+        last (int, optional): if provided, only this many last values will be plotted at the beginning or at the end.
+        ax (matplotlib.axes.Axes, optional): the axes to plot on. If None, a new figure is created.
+        legend (bool, optional): whether to show the legend. Default is False.
+    """
+
+    assert solutions.ndim == 2, 'Solutions must be 2D.'
+    assert solutions.shape[1] == ts.shape[0], 'Solutions and time points must have the same length.'
+    assert len(labels) == solutions.shape[0], 'Labels and solutions must have the same length.'
+
+    x_analytical = np.cos(ts)
+    errors = np.abs(solutions - x_analytical)
+    # print(np.mean(errors)) 
+
+    if last is not None:
+        if last < 0:
+            ax.set_xlim((ts[last], ts[-1]))
+        else:
+            ax.set_xlim((ts[0], ts[last]))
+        # ax.set_ylim((np.mean(errors) - 0.01, np.max(errors) + 0.01))
+
+    if ax is None:
+        fig, ax = plt.subplots()
+        fig.set_size_inches(4, 4)
+    else:
+        fig = ax.get_figure()
+
+    for i, error in enumerate(errors):
+        ax.plot(ts, error, label=f'Error {labels[i]}', linewidth=1)
+
+    ax.set_xlabel('$t$')
+    ax.set_yscale('log')
+
+    if legend:
+        ax.legend(fontsize='small', loc='lower right')
+    else:
+        ax.set_ylabel('Error')
+    
+    if ax is None:
+        plt.show()
+
+
+def plot_energy_comparison(xs, vs, ts, labels, E_base, k=1, m=1, last=None, ax=None, legend=False):
+    """
+    Plots the energy of multiple numerical solutions
+    of the harmonic oscillator.
+    Arguments:
+        xs (numpy.ndarray): the solutions for the oscillator's position.
+        vs (numpy.ndarray): the solutions for the oscillator's velocity.
+        ts (numpy.ndarray): the time points.
+        labels (list): the labels of the solutions.
+        E_base (float): the baseline energy of the system.
+        k (float, optional): the spring constant. Default is 1.
+        m (float, optional): the mass. Default is 1.
+        last (int, optional): if provided, only this many last values will be plotted at the beginning or at the end.
+        ax (matplotlib.axes.Axes, optional): the axes to plot on. If None, a new figure is created.
+        legend (bool, optional): whether to show the legend. Default is False.
+    """
+
+    assert xs.shape == vs.shape, 'Solutions must have the same shape.'
+    assert xs.shape[1] == ts.shape[0], 'Solutions and time points must have the same length.'
+    assert len(labels) == xs.shape[0], 'Labels and solutions must have the same length.'
+
+    Es = 0.5 * m * vs**2 + 0.5 * k * xs**2
+
+    if ax is None:
+        fig, ax = plt.subplots()
+        fig.set_size_inches(4, 4)
+    else:
+        fig = ax.get_figure()
+
+    if last is not None:
+        if last < 0:
+            ax.set_xlim((ts[last], ts[-1]))
+        else:
+            ax.set_xlim((ts[0], ts[last]))
+        # ax.set_ylim((np.min(Es), np.max(Es)))
+
+    for i, E in enumerate(Es):
+        ax.plot(ts, E, label=f'Energy {labels[i]}', linewidth=1)
+
+    ax.hlines(E_base, ts[0], ts[-1], linestyles='dashed', label='Initial Energy')
+
+    ax.set_xlabel('$t$')
+    ax.set_yscale('log')
+
+    if legend:
+        ax.legend(fontsize='small', loc='lower right')
+    else:
+        ax.set_ylabel('Energy')
+    
+    if ax is None:
+        plt.show()
+
+
+def plot_leapfrog_rk45_comparison(xs1, vs1, xs2, vs2, ts, k=1, m=1, last=None):
+    """
+    Creates a combined plot of the errors and energies
+    of the leapfrog and Runge-Kutta 4th order methods.
+    Arguments:
+        xs1 (numpy.ndarray): the positions of the leapfrog method.
+        vs1 (numpy.ndarray): the velocities of the leapfrog method.
+        xs2 (numpy.ndarray): the positions of the Runge-Kutta 4th order method.
+        vs2 (numpy.ndarray): the velocities of the Runge-Kutta 4th order method.
+        ts (numpy.ndarray): the time points.
+        k (float, optional): the spring constant. Default is 1.
+        m (float, optional): the mass. Default is 1.
+        last (int, optional): if provided, only this many last values will be plotted.
+    """
+
+    assert xs1.shape == vs1.shape == xs2.shape == vs2.shape == ts.shape, 'Solutions and time points must have the same shape.'
+
+    fig, axs = plt.subplots(2, 2, sharey='row')
+    fig.set_size_inches(4.5, 4.5)
+
+    for i in range(2):
+        for j in range(2):
+            axs[i, j].tick_params(axis='x', which='major', labelsize=9)
+            axs[i, j].tick_params(axis='x', which='minor', labelsize=9)
+            axs[i, j].tick_params(axis='y', which='major', labelsize=9)
+            axs[i, j].tick_params(axis='y', which='minor', labelsize=9)
+
+    if last is None:
+        last = ts.shape[0] // 2
+
+    E_base = 0.5 * m * vs1[0]**2 + 0.5 * k * xs1[0]**2
+
+    # Plot starting errors
+    plot_solution_errors(np.array([xs1, xs2]), ts, ['Leapfrog', 'RK4'], last=last, ax=axs[0, 0])
+    # Plot starting energies
+    plot_energy_comparison(np.array([xs1, xs2]), np.array([vs1, vs2]), ts,
+                           ['Leapfrog', 'RK4'], E_base, k=k, m=m, last=last, ax=axs[1, 0])
+    # Plot ending errors
+    plot_solution_errors(np.array([xs1, xs2]), ts, ['Leapfrog', 'RK4'], last=-last, ax=axs[0, 1], legend=True)
+    # Plot ending energies
+    plot_energy_comparison(np.array([xs1, xs2]), np.array([vs1, vs2]), ts,
+                           ['Leapfrog', 'RK4'], E_base, k=k, m=m, last=-last, ax=axs[1, 1], legend=True)
 
     plt.show()

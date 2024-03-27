@@ -2,6 +2,7 @@ import numpy as np
 import scipy.linalg as la
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
+import scipy.integrate as spi
 
 def construct_coeff_matrix(size_x, size_y, boundary_type='rect', sparse=False):
     """
@@ -345,3 +346,97 @@ def compute_wave_time_dependent_multiple(init_amps, init_vels, eigvecs, eigvals,
         u_evolutions.append(u_evolutions_bndry)
     
     return u_evolutions
+
+
+def compute_harmonic_oscillator_leapfrog(x0, v0, t_max, k, m=1, dt=0.01, omega=None):
+    """
+    Integrates the motion of a harmonic oscillator
+    using the Leapfrog method.
+    Arguments:
+        x0 (float): the initial position.
+        v0 (float): the initial velocity.
+        t_max (float): the maximum time.
+        k (float): the spring constant.
+        m (float): the mass. Default is 1.
+        dt (float): the time step. Default is 0.01.
+        omega (float): the frequency of the external driving force. Default is None.
+    Returns:
+        np.ndarray: the positions.
+        np.ndarray: the velocities.
+        np.ndarray: the time steps.
+    """
+
+    a = - k * dt / m
+
+    x = x0
+    v = v0 + 0.5 * a * x0
+
+    ts = np.arange(0, t_max, dt)
+    xs = np.empty(ts.shape[0])
+    vs = np.empty(ts.shape[0])
+
+    xs[0] = x0
+    vs[0] = v0
+    
+    for i in range(1, ts.shape[0]):
+
+        # Record state
+        xs[i] = x + v * dt
+        if omega is None:
+            vs[i] = v + 0.5* a * xs[i]
+        else:
+            vs[i] = v + 0.5* a * xs[i] + 0.5 * np.cos(omega * ts[i])
+        
+        x += v * dt
+        if omega is None:
+            v += a * x
+        else:
+            v += a * x + np.cos(omega * ts[i])
+    
+    return xs, vs, ts
+
+
+def compute_harmonic_oscillator_rk45(x0, v0, t_max, k, m=1, dt=0.01):
+    """
+    Integrates the motion of a harmonic oscillator
+    using the Runge-Kutta 4-5 method.
+    Arguments:
+        x0 (float): the initial position.
+        v0 (float): the initial velocity.
+        t_max (float): the maximum time.
+        k (float): the spring constant.
+        m (float): the mass. Default is 1.
+        rec_every (int): the interval for recording the state. Default is 1.
+    Returns:
+        np.ndarray: the positions.
+        np.ndarray: the velocities.
+        np.ndarray: the time steps.
+    """
+
+    a = - k / m
+
+    def harmonic_oscillator(t, y):
+        x = y[0]
+        v = y[1]
+        return np.array([v, a * x])
+    
+    rk45 = spi.RK45(harmonic_oscillator, 0, np.array([x0, v0]), t_max+1e-6, first_step=dt, max_step=dt)
+
+    ts = np.arange(0, t_max, dt)
+    xs = np.empty(ts.shape[0])
+    vs = np.empty(ts.shape[0])
+    ts_out = np.empty(ts.shape[0])
+
+    xs[0] = x0
+    vs[0] = v0
+    ts_out[0] = 0
+
+    for i in range(1, ts.shape[0]):
+        rk45.step()
+        xs[i] = rk45.y[0]
+        vs[i] = rk45.y[1]
+        ts_out[i] = rk45.t
+    
+    # print(np.max(np.abs(ts_out-ts)))
+
+    return xs, vs, ts
