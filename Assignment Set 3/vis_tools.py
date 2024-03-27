@@ -132,21 +132,28 @@ def plot_coeff_matrix(coeff_matrix, ax=None):
         plt.show()
 
 
-def plot_lattice_2D(coeff_matrix, lattice_coords):
+def plot_lattice_2D(coeff_matrix, lattice_coords, horizontal=False):
     """
     Creates a combined plot of the lattice topology and the coefficient matrix.
     Arguments:
         coeff_matrix (np.ndarray): the coefficient matrix.
         lattice_coords (np.ndarray): the coordinates of the lattice points.
+        horizontal (bool, optional): whether to align the plots horizontally. Default is False.
     """
 
-    fig, ax = plt.subplots(2, 1)
-    fig.set_size_inches(4, 8)
+    if horizontal:
+        fig, ax = plt.subplots(1, 2)
+        fig.set_size_inches(4, 2)
+        pad = 10
+    else:
+        fig, ax = plt.subplots(2, 1)
+        fig.set_size_inches(4, 8)
+        pad = 0
     plot_lattice_topo_from_coeff(coeff_matrix, lattice_coords, ax=ax[0])
     plot_coeff_matrix(coeff_matrix, ax=ax[1])
 
-    ax[0].set_title('Lattice Topology')
-    ax[1].set_title('Coefficient Matrix')
+    ax[0].set_title('Lattice Topology', pad=pad)
+    ax[1].set_title('Coefficient Matrix', pad=pad)
 
     plt.tight_layout()
     plt.show()
@@ -267,8 +274,11 @@ def plot_eigvals_Ls(result_setups, eigvals):
 
     assert eigvals.ndim == 2, 'Eigenvalues must be 2D.'
 
-    fig, axs = plt.subplots(boundaries.shape[0], 1)
-    fig.set_size_inches(3.5, 3.25 * boundaries.shape[0])
+    # fig, axs = plt.subplots(boundaries.shape[0], 1)
+    # fig.set_size_inches(3.5, 3.25 * boundaries.shape[0])
+    fig, axs = plt.subplots(1, boundaries.shape[0])
+    fig.set_size_inches(7, 6 / boundaries.shape[0])
+    fig.subplots_adjust(wspace=0.3)
 
     for i, boundary in enumerate(boundaries):
 
@@ -285,12 +295,26 @@ def plot_eigvals_Ls(result_setups, eigvals):
             '$|K|$': eigval_selection.flatten()
         })
 
-        sns.lineplot(data=df_plot, x='$L$', y='$|K|$', hue='$K$ index', ax=axs[i])
+        if i == len(boundaries) - 1:
+            legend = True
+        else:
+            legend = False
+
+        sns.lineplot(data=df_plot, x='$L$', y='$|K|$', hue='$K$ index', ax=axs[i], legend=legend)
         axs[i].set_xscale('log')
         axs[i].set_yscale('log')
-        axs[i].set_title(f'Boundary: {boundary}')
+        axs[i].set_title(boundary)
 
-    plt.tight_layout()
+        if legend:
+            leg = axs[i].legend(ncol=2, loc='lower left', bbox_to_anchor=(0, 0), columnspacing=0.5)
+            leg.set_title('$K$ index', prop={'size': 10})
+            for t in leg.texts:
+                t.set_fontsize(8)
+
+        if i > 0:
+            axs[i].set(ylabel='')
+
+    # plt.tight_layout()
     plt.show()
 
 
@@ -311,8 +335,11 @@ def plot_eigvals_Ns(result_setups, eigvals):
 
     assert eigvals.ndim == 2, 'Eigenvalues must be 2D.'
 
-    fig, axs = plt.subplots(boundaries.shape[0], 1)
-    fig.set_size_inches(3.5, 3.25 * boundaries.shape[0])
+    # fig, axs = plt.subplots(boundaries.shape[0], 1)
+    # fig.set_size_inches(3.5, 3.25 * boundaries.shape[0])
+    fig, axs = plt.subplots(1, boundaries.shape[0])
+    fig.set_size_inches(6, 5 / boundaries.shape[0])
+    fig.subplots_adjust(wspace=0.3)
 
     for i, boundary in enumerate(boundaries):
 
@@ -325,11 +352,14 @@ def plot_eigvals_Ns(result_setups, eigvals):
         axs[i].set_xscale('log')
         axs[i].set_yscale('log')
         axs[i].set_xlabel('$N$')
-        axs[i].set_ylabel('$|K|$ range')
-        axs[i].set_title(f'Boundary: {boundary}')
-        axs[i].legend()
+        if i == 0:
+            axs[i].set_ylabel('$|K|$ range')
+        axs[i].set_title(boundary)
+        
+        if i == len(boundaries) - 1:
+            axs[i].legend(fontsize=9, loc='center right', bbox_to_anchor=(1, 0.3))
 
-    plt.tight_layout()
+    # plt.tight_layout()
     plt.show()
 
 
@@ -923,7 +953,7 @@ def plot_leapfrog_rk45_comparison(xs1, vs1, xs2, vs2, ts, k=1, m=1, last=None):
 
     fig, axs = plt.subplots(2, 2, sharey='row')
     fig.set_size_inches(4.5, 4.5)
-
+    
     for i in range(2):
         for j in range(2):
             axs[i, j].tick_params(axis='x', which='major', labelsize=9)
@@ -946,5 +976,5 @@ def plot_leapfrog_rk45_comparison(xs1, vs1, xs2, vs2, ts, k=1, m=1, last=None):
     # Plot ending energies
     plot_energy_comparison(np.array([xs1, xs2]), np.array([vs1, vs2]), ts,
                            ['Leapfrog', 'RK4'], E_base, k=k, m=m, last=-last, ax=axs[1, 1], legend=True)
-
+    
     plt.show()

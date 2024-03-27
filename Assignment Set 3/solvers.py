@@ -383,9 +383,9 @@ def compute_harmonic_oscillator_leapfrog(x0, v0, t_max, k, m=1, dt=0.01, omega=N
         # Record state
         xs[i] = x + v * dt
         if omega is None:
-            vs[i] = v + 0.5* a * xs[i]
+            vs[i] = v + 0.5 * a * xs[i]
         else:
-            vs[i] = v + 0.5* a * xs[i] + 0.5 * np.cos(omega * ts[i])
+            vs[i] = v + 0.5 * a * xs[i] + 0.5 * np.cos(omega * ts[i])
         
         x += v * dt
         if omega is None:
